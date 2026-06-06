@@ -18,6 +18,7 @@ from openagentio.adapter.http.options import (
     WithIdleTimeout,
     WithLogger,
     WithMiddleware,
+    WithSSERetry,
     WithTimeout,
 )
 
@@ -30,6 +31,7 @@ __all__ = [
     "WithLogger",
     "WithTimeout",
     "WithIdleTimeout",
+    "WithSSERetry",
     "WithMiddleware",
     "AuthContext",
     "AuthFunc",

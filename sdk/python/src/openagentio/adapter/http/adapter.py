@@ -37,6 +37,7 @@ class Adapter:
         self._log: logging.Logger = opts.logger or logging.getLogger("openagentio.http")
         self._timeout: float = opts.timeout
         self._idle: float = opts.idle_timeout
+        self._sse_retry: float = opts.sse_retry
 
         # Curried handlers — each receives the adapter instance via closure.
         async def _invoke(request) -> ...:

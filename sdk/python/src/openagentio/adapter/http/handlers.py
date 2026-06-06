@@ -108,15 +108,16 @@ async def handle_stream(adapter: Adapter, request: Request) -> Response:
         return write_bus_error(exc)
 
     async def event_generator():
+        retry_ms = int(adapter._sse_retry * 1000)
         try:
             async for frame in stream:
-                yield _format_sse_envelope(frame)
+                yield _format_sse_envelope(frame, retry_ms)
                 if frame.is_final:
                     break
         except (asyncio.TimeoutError, ErrIdleTimeout) as exc:
-            yield _format_sse_error(exc)
+            yield _format_sse_error(exc, retry_ms)
         except Exception as exc:
-            yield _format_sse_error(exc)
+            yield _format_sse_error(exc, retry_ms)
         finally:
             await stream.close()
 
@@ -158,16 +159,18 @@ async def handle_publish(adapter: Adapter, request: Request) -> Response:
     return Response(status_code=202)
 
 
-def _format_sse_envelope(env: Envelope) -> bytes:
+def _format_sse_envelope(env: Envelope, retry_ms: int = 0) -> bytes:
     body = env.to_bytes()
     parts = [f"event: {env.event_type}\n"]
     if env.event_id:
         parts.append(f"id: {env.event_id}\n")
+    if retry_ms > 0:
+        parts.append(f"retry: {retry_ms}\n")
     parts.append(f"data: {body.decode('utf-8')}\n\n")
     return "".join(parts).encode("utf-8")
 
 
-def _format_sse_error(exc: BaseException) -> bytes:
+def _format_sse_error(exc: BaseException, retry_ms: int = 0) -> bytes:
     code = CodeAgentUnavailable
     if isinstance(exc, (asyncio.TimeoutError, ErrIdleTimeout)):
         code = CodeAgentTimeout
@@ -175,4 +178,4 @@ def _format_sse_error(exc: BaseException) -> bytes:
     frame.is_final = True
     payload = ErrorPayload(code=code, message=str(exc))
     frame.payload = json.dumps({"code": payload.code, "message": payload.message}).encode("utf-8")
-    return _format_sse_envelope(frame)
+    return _format_sse_envelope(frame, retry_ms)
