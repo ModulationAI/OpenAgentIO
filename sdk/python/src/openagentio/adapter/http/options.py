@@ -16,6 +16,7 @@ class AdapterOptions:
     logger: logging.Logger | None = None
     timeout: float = 30.0
     idle_timeout: float = 0.0
+    sse_retry: float = 3.0
     middleware: list[ASGIMiddleware] = field(default_factory=list)
 
 
@@ -44,6 +45,12 @@ def WithTimeout(d: float) -> Option:
 def WithIdleTimeout(d: float) -> Option:
     def apply(o: AdapterOptions) -> None:
         o.idle_timeout = d
+    return apply
+
+
+def WithSSERetry(d: float) -> Option:
+    def apply(o: AdapterOptions) -> None:
+        o.sse_retry = d
     return apply
 
 

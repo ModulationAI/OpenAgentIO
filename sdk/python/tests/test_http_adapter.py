@@ -19,7 +19,7 @@ from openagentio.adapter.http.adapter import New
 from openagentio.adapter.http.auth import AuthContext, AuthFunc, BearerAuth, ErrUnauthorized
 from openagentio.adapter.http.errors import status_for_code, status_for_bus_error
 from openagentio.adapter.http.middleware import Recover, Logging
-from openagentio.adapter.http.options import WithAuth, WithTimeout, WithIdleTimeout, WithLogger
+from openagentio.adapter.http.options import WithAuth, WithTimeout, WithIdleTimeout, WithLogger, WithSSERetry
 from openagentio.bus.stream import ErrIdleTimeout
 from openagentio.event.envelope import Envelope
 from openagentio.event.payload import (
@@ -59,7 +59,7 @@ def _client(bus: Bus, *adapter_opts) -> TestClient:
 
 
 def _parse_sse(text: str) -> list[dict]:
-    """Parse SSE text into list of {event, id, data} dicts."""
+    """Parse SSE text into list of {event, id, retry, data} dicts."""
     frames: list[dict] = []
     cur: dict = {}
     for line in text.split("\n"):
@@ -72,6 +72,8 @@ def _parse_sse(text: str) -> list[dict]:
             cur["event"] = line[7:]
         elif line.startswith("id: "):
             cur["id"] = line[4:]
+        elif line.startswith("retry: "):
+            cur["retry"] = line[7:]
         elif line.startswith("data: "):
             cur["data"] = line[6:]
     if cur:
@@ -237,6 +239,7 @@ class TestStream:
         # Frame 0: started — has event, id, valid envelope JSON.
         assert frames[0]["event"] == "agent.response.started"
         assert "id" in frames[0]
+        assert frames[0]["retry"] == "3000"
         env0 = json.loads(frames[0]["data"])
         assert env0["event_type"] == "agent.response.started"
         # seq omitted when 0 per Envelope.to_dict() omitempty semantics.
@@ -244,14 +247,38 @@ class TestStream:
 
         # Frame 1: delta — seq=1.
         assert frames[1]["event"] == "agent.response.delta"
+        assert frames[1]["retry"] == "3000"
         env1 = json.loads(frames[1]["data"])
         assert env1["seq"] == 1
 
         # Frame 2: final — seq=2, is_final=True.
         assert frames[2]["event"] == "agent.response.final"
+        assert frames[2]["retry"] == "3000"
         env2 = json.loads(frames[2]["data"])
         assert env2["seq"] == 2
         assert env2["is_final"] == True
+
+    @pytest.mark.asyncio
+    async def test_stream_sse_retry_option(self):
+        """WithSSERetry controls retry: milliseconds; zero disables it."""
+        bus = await _make_bus()
+
+        async def stream_once(env: Envelope, writer):
+            await writer.final({"done": True})
+
+        await bus.handle_stream("once", stream_once)
+        with _client(bus, WithSSERetry(1.25)) as c:
+            resp = c.post("/v1/agents/once/stream", json={})
+        frames = _parse_sse(resp.text)
+        assert resp.status_code == 200
+        assert frames[0]["retry"] == "1250"
+
+        with _client(bus, WithSSERetry(0)) as c:
+            resp = c.post("/v1/agents/once/stream", json={})
+        await bus.close()
+        frames = _parse_sse(resp.text)
+        assert resp.status_code == 200
+        assert "retry" not in frames[0]
 
     @pytest.mark.asyncio
     async def test_stream_idle_timeout_emits_error_frame(self):
@@ -273,6 +300,7 @@ class TestStream:
         assert len(frames) >= 2
         last = frames[-1]
         assert last["event"] == "agent.response.error"
+        assert last["retry"] == "3000"
         env = json.loads(last["data"])
         assert env["is_final"] == True
         # Payload is embedded as structured value per Envelope.to_dict().
