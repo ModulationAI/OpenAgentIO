@@ -105,6 +105,7 @@ Distributed Agent Communication Complexity
 | ⭐️ Agent Handoff | Context Transfer |
 | ⭐️ Async Task | Asynchronous Task Processing |
 | ⭐️ Browser/WebAPP Integration | HTTP + SSE Streaming |
+| ⭐️ Remote Capability Calling | Agent-to-Agent Function Invocation |
 
 
 ## Scenario Demo
@@ -116,6 +117,7 @@ Distributed Agent Communication Complexity
 [![OpenAgentIO Scenario-5](./assets/s5.gif)]()
 [![OpenAgentIO Scenario-6](./assets/s6.gif)]()
 [![OpenAgentIO Scenario-7](./assets/s7.gif)]()
+[![OpenAgentIO Scenario-8](./assets/s8.gif)]()
 
 ## Install
 
