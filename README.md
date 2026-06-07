@@ -119,16 +119,10 @@ Distributed Agent Communication Complexity
 [![OpenAgentIO Scenario-7](./assets/s7.gif)]()
 [![OpenAgentIO Scenario-8](./assets/s8.gif)]()
 
-## Install
+## Installation and More Examples
 
-1. Go SDK (1.25+)
-```sh
-go get github.com/ModulationAI/openagentio
-```
+For details, please refer to [OpenAgentIO SDK Examples](https://github.com/ModulationAI/OpenAgentIO-example)
 
-2. Python SDK (3.10+)
-```sh
-pip install openagentio
 ```
 
 ## Design Philosophy
