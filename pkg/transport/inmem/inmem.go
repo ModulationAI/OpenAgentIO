@@ -150,11 +150,14 @@ func (d *Driver) OpenInbox(ctx context.Context) (transport.Inbox, error) {
 	box := &inbox{
 		subject: subject,
 		ch:      make(chan *transport.RawMessage, 64),
+		done:    make(chan struct{}),
 	}
 	sub, err := d.Subscribe(ctx, subject, "", func(ctx context.Context, m *transport.RawMessage) error {
 		select {
 		case box.ch <- m:
 			return nil
+		case <-box.done:
+			return errors.New("inmem inbox: closed")
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -169,6 +172,7 @@ func (d *Driver) OpenInbox(ctx context.Context) (transport.Inbox, error) {
 type inbox struct {
 	subject string
 	ch      chan *transport.RawMessage
+	done    chan struct{}
 	sub     transport.Subscription
 	once    sync.Once
 }
@@ -177,11 +181,10 @@ func (i *inbox) Subject() string { return i.subject }
 
 func (i *inbox) Recv(ctx context.Context) (*transport.RawMessage, error) {
 	select {
-	case m, ok := <-i.ch:
-		if !ok {
-			return nil, errors.New("inmem inbox: closed")
-		}
+	case m := <-i.ch:
 		return m, nil
+	case <-i.done:
+		return nil, errors.New("inmem inbox: closed")
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -190,10 +193,10 @@ func (i *inbox) Recv(ctx context.Context) (*transport.RawMessage, error) {
 func (i *inbox) Close() error {
 	var err error
 	i.once.Do(func() {
+		close(i.done)
 		if i.sub != nil {
 			err = i.sub.Unsubscribe()
 		}
-		close(i.ch)
 	})
 	return err
 }
