@@ -110,7 +110,8 @@ Distributed Agent Communication Complexity
 
 ## Scenario Demo
 
-[![OpenAgentIO Scenario-1](./assets/s1.gif)]()
+[![OpenAgentIO Scenario-1](./assets/s1.gif)][![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FModulationAI%2Fopenagentio.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FModulationAI%2Fopenagentio?ref=badge_shield)
+()
 [![OpenAgentIO Scenario-2](./assets/s2.gif)]()
 [![OpenAgentIO Scenario-3](./assets/s3.gif)]()
 [![OpenAgentIO Scenario-4](./assets/s4.gif)]()
@@ -165,3 +166,6 @@ while keeping the runtime model composable across different transport backends.s
 ## License
 
 OpenAgentIO is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FModulationAI%2Fopenagentio.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FModulationAI%2Fopenagentio?ref=badge_large)
