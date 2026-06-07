@@ -123,8 +123,6 @@ Distributed Agent Communication Complexity
 
 For details, please refer to [OpenAgentIO SDK Examples](https://github.com/ModulationAI/OpenAgentIO-example)
 
-```
-
 ## Design Philosophy
 OpenAgentIO focuses on the communication runtime layer for distributed AI agents.
 
