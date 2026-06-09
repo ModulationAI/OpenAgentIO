@@ -1,6 +1,6 @@
 {
   "name": "@openagentio/client",
-  "version": "0.2.0-alpha.2",
+  "version": "0.2.3",
   "description": "Framework-agnostic TypeScript client for the OpenAgentIO HTTP/SSE adapter.",
   "license": "Apache-2.0",
   "type": "module",

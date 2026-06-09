@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openagentio"
-version = "0.2.0a2"
+version = "0.2.3"
 description = "Python SDK for OpenAgentIO — ACP-compatible Envelope protocol on top of NATS / asyncio."
 readme = "README.md"
 requires-python = ">=3.11"
