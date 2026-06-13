@@ -232,7 +232,13 @@ class Bus:
         target: str,
         handler: InvokeHandler,
         *options: HandleOption,
-    ) -> None:
+    ) -> TransportSubscription:
+        """Register an invoke handler. Returns the Subscription so callers
+        that own a finer-grained lifecycle than the Bus (e.g. bridges that
+        start/stop independently of the Bus) can ``unsubscribe()`` it
+        early. Callers that ignore the return value are unaffected — the
+        Bus still tracks the subscription and tears it down on ``close()``.
+        """
         if not target:
             raise ValueError("bus: empty invoke target")
         if handler is None:
@@ -251,6 +257,7 @@ class Bus:
 
         sub = await self._transport.subscribe(subject, queue, invoke_dispatch)
         self._track_owned(sub)
+        return sub
 
     async def _handle_one(self, req: Envelope, handler: InvokeHandler) -> None:
         result: Any = None
@@ -342,7 +349,13 @@ class Bus:
         target: str,
         handler: StreamHandler,
         *options: HandleOption,
-    ) -> None:
+    ) -> TransportSubscription:
+        """Register a stream handler. Returns the Subscription so callers
+        that own a finer-grained lifecycle than the Bus (e.g. bridges that
+        start/stop independently of the Bus) can ``unsubscribe()`` it
+        early. Callers that ignore the return value are unaffected — the
+        Bus still tracks the subscription and tears it down on ``close()``.
+        """
         if not target:
             raise ValueError("bus: empty invoke target")
         if handler is None:
@@ -366,6 +379,7 @@ class Bus:
 
         sub = await self._transport.subscribe(subject, queue, stream_dispatch)
         self._track_owned(sub)
+        return sub
 
     async def _run_stream_handler(
         self, req: Envelope, handler: StreamHandler

@@ -18,7 +18,9 @@ sdk/python/
 │   └── bus/            # Bus, Stream, StreamWriter, subject layout
 ├── tests/              # pytest, pytest-asyncio
 └── examples/
-    └── echo_agent.py
+    ├── echo_agent.py
+    ├── custom_bridge.py
+    └── openclaw_quickstart.py
 ```
 
 ## Install (development)
@@ -62,6 +64,42 @@ asyncio.run(main())
 
 See `examples/echo_agent.py` for a runnable version that mirrors
 `examples/echo-agent/main.go` from the Go SDK.
+
+Bridge authors can start from `examples/custom_bridge.py`, which shows how to
+implement a custom `Bridge`, register a factory, and run it through
+`BridgeRunner`. See `<repo>/docs/custom_bridge.md` for the developer guide.
+
+## OpenClaw Quickstart
+
+For a local OpenClaw Gateway exposing the OpenAI-compatible streaming chat
+endpoint:
+
+```bash
+export OPENCLAW_GATEWAY_BASE_URL=http://127.0.0.1:18789/v1
+export OPENCLAW_GATEWAY_TOKEN=your-token
+
+env PYTHONPATH=src .venv/bin/python examples/openclaw_quickstart.py "你好"
+```
+
+The quickstart sends one OpenAgentIO `stream_invoke()` request to the
+`openclaw_chat_sse` bridge and prints OpenClaw's streamed response.
+
+Application code can use the same bridge without constructing low-level
+bridge config objects:
+
+```python
+from openagentio import Bus, InMemoryDriver
+from openagentio.bridge import OpenClawChatBridge
+
+bus = Bus(agent_id="my-app", transport=InMemoryDriver())
+await bus.connect()
+
+bridge = OpenClawChatBridge.from_env(bus, target="openclaw.chat")
+await bridge.start()
+
+async for env in await bus.stream_invoke("openclaw.chat", {"text": "你好"}):
+    print(env.payload_json())
+```
 
 ## Protocol
 
