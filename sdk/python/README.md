@@ -41,6 +41,10 @@ AFB_NATS_URL=nats://localhost:4222 .venv/bin/pytest tests/test_nats_integration.
 The NATS integration tests are gated on the `AFB_NATS_URL` env var. Start a
 local broker first, e.g. `nats-server -p 4222`.
 
+The MCP bridge tests in `tests/test_bridge_mcp_tool.py` spawn a real stdio
+subprocess. If the full suite hangs, run those tests separately; the most recent
+verification focused on the relevant bridge test set.
+
 ## Example
 
 ```python
@@ -100,6 +104,141 @@ await bridge.start()
 async for env in await bus.stream_invoke("openclaw.chat", {"text": "你好"}):
     print(env.payload_json())
 ```
+
+## MCP Tool Quickstart
+
+Expose any MCP server's tools as OpenAgentIO `invoke` targets. First install
+the optional `mcp` and `bridge` extras (`bridge` provides PyYAML, which the
+quickstart config file uses):
+
+```bash
+.venv/bin/pip install -e ".[mcp,bridge]"
+```
+
+Example bridge config (`examples/mcp_bridge.yaml`):
+
+```yaml
+version: "openagentio.bridge/v1"
+bridges:
+  - name: "mcp-fs"
+    type: "mcp_tool"
+    config:
+      transport: "stdio"
+      command: "npx"
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-filesystem"
+        - "/tmp"
+      env:
+        NODE_ENV: "production"
+      timeout: 10
+    mappings:
+      target_prefix: "mcp-fs"
+```
+
+Run the quickstart (create a sample file first so `read_file` succeeds):
+
+```bash
+printf "hello\\n" > /tmp/hello.txt
+env PYTHONPATH=src .venv/bin/python examples/mcp_quickstart.py \
+    --config examples/mcp_bridge.yaml --path /tmp/hello.txt
+```
+
+If the file does not exist, `mcp_quickstart.py` will create a sample file
+automatically and print a notice before invoking the tool.
+
+This starts the MCP filesystem server over stdio, registers each discovered
+tool as `mcp-fs.<tool_name>`, and invokes `mcp-fs.read_file` through the Bus.
+
+You can also load the same config programmatically:
+
+```python
+from openagentio import Bus, InMemoryDriver
+from openagentio.bridge import BUILTIN_FACTORIES, BridgeConfig
+from openagentio.bridge.runner import BridgeRunner
+
+bus = Bus(agent_id="my-app", transport=InMemoryDriver())
+await bus.connect()
+
+config = BridgeConfig.from_file("examples/mcp_bridge.yaml")
+runner = BridgeRunner(bus, config, BUILTIN_FACTORIES)
+await runner.start()
+
+resp = await bus.invoke("mcp-fs.read_file", {"path": "/tmp/hello.txt"})
+print(resp.payload_json())
+```
+
+### Streamable HTTP transport
+
+For remote MCP servers that expose the Streamable HTTP transport, use
+`examples/mcp_bridge_http.yaml`:
+
+```yaml
+version: "openagentio.bridge/v1"
+bridges:
+  - name: "mcp-http"
+    type: "mcp_tool"
+    config:
+      transport: "streamable_http"
+      http_url: "http://localhost:8000/mcp"
+      # token: "your-token"          # optional literal Bearer token
+      headers:                      # optional extra headers
+        X-Custom-Header: "openagentio"
+      timeout: 30
+    mappings:
+      target_prefix: "mcp-http"
+```
+
+`BridgeConfig.from_file()` reads literal values; it does not expand environment
+variables. Use a literal `token` here, or construct the `BridgeDefinition`
+programmatically if you need dynamic values.
+
+When you construct `McpToolBridge` programmatically and provide your own
+`http_client`, that client is used as-is: the bridge will not inject the
+`token` or `headers` from the config into it. Configure authentication and any
+extra headers directly on the client you pass in.
+
+HTTP errors are mapped to OpenAgentIO error codes:
+
+- `401` / `403` -> `AUTH_FAILURE`
+- `5xx` -> `TRANSPORT_FAILURE`
+- connection errors -> `AGENT_UNAVAILABLE`
+- timeouts -> `AGENT_TIMEOUT`
+
+### Session and trace propagation
+
+For every tool call, the bridge forwards the current OpenAgentIO `session_id`
+and `traceparent` to the MCP server via the JSON-RPC `_meta` field:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "read_file",
+    "arguments": { "path": "/tmp/hello.txt" },
+    "_meta": {
+      "session_id": "<openagentio-session-id>",
+      "traceparent": "<w3c-traceparent>"
+    }
+  }
+}
+```
+
+This works for both `stdio` and `streamable_http` transports because the
+context travels with the MCP message itself. The official MCP Python SDK does
+not expose per-request HTTP headers for `streamable_http`; the HTTP request is
+issued by a background task created during `start()`, so transport-level
+headers cannot carry per-invoke context.
+
+### MCP bridge scope
+
+**Supported:** exposing MCP server **tools** as OpenAgentIO `invoke` targets.
+Each discovered tool becomes `{target_prefix}.{tool_name}` on the Bus, and tool
+results are returned as `agent.response.final` envelopes.
+
+**Not yet supported:** full MCP host/runtime, resources as event streams,
+prompts, sampling, roots, or bidirectional session features.
 
 ## Protocol
 

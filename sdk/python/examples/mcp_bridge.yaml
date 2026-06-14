@@ -1,0 +1,18 @@
+version: "openagentio.bridge/v1"
+bridges:
+  - name: "mcp-fs"
+    type: "mcp_tool"
+    config:
+      transport: "stdio"
+      command: "npx"
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-filesystem"
+        - "/tmp"
+      env:
+        NODE_ENV: "production"
+      timeout: 10
+    mappings:
+      # short-term: target_prefix lives in mappings.extra until the shared
+      # BridgeMappings schema gains a dedicated field.
+      target_prefix: "mcp-fs"
