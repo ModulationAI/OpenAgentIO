@@ -1,0 +1,25 @@
+{
+  "version": "openagentio.bridge/v1",
+  "bridges": [
+    {
+      "name": "mcp-fs",
+      "type": "mcp_tool",
+      "config": {
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/tmp"
+        ],
+        "env": {
+          "NODE_ENV": "production"
+        },
+        "timeout": 10
+      },
+      "mappings": {
+        "target_prefix": "mcp-fs"
+      }
+    }
+  ]
+}

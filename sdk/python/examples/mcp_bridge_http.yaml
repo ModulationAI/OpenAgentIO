@@ -1,0 +1,17 @@
+version: "openagentio.bridge/v1"
+bridges:
+  - name: "mcp-http"
+    type: "mcp_tool"
+    config:
+      transport: "streamable_http"
+      http_url: "http://localhost:8000/mcp"
+      # Optional bearer token. BridgeConfig.from_file() does NOT expand
+      # environment variables, so write a literal value here or build the
+      # BridgeDefinition programmatically.
+      # token: "your-mcp-token"
+      # Optional extra headers.
+      headers:
+        X-Custom-Header: "openagentio"
+      timeout: 30
+    mappings:
+      target_prefix: "mcp-http"
