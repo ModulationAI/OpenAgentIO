@@ -1,0 +1,20 @@
+version: "openagentio.bridge/v1"
+bridges:
+  - name: "matrix-main"
+    type: "matrix_event"
+    config:
+      # Replace with your Matrix homeserver and bot credentials.
+      homeserver_url: "https://matrix.example.com"
+      access_token: "your-access-token"
+      user_id: "@bot:example.com"
+      room_ids:
+        - "!roomid:example.com"
+      sync_timeout: 30
+      reconnect_delay: 2
+      initial_sync_behavior: "skip"
+      outbound_msgtype: "m.text"
+    mappings:
+      event_prefix: "matrix"
+      inbound_message_event: "matrix.message.received"
+      outbound_message_event: "matrix.message.send"
+      session_strategy: "room"

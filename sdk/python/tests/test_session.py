@@ -11,6 +11,7 @@ from openagentio import (
     Trace,
     WithAgentID,
     WithMiddleware,
+    WithSessionPropagation,
     WithTransport,
     session,
 )
@@ -139,5 +140,138 @@ async def test_session_clears_after_handler_returns() -> None:
 
         assert await asyncio.create_task(probe()) is None
         assert session.current() is None
+    finally:
+        await bus.close()
+
+
+async def test_invoke_inherits_session_from_subscribe_handler() -> None:
+    """A handler triggered by bus.publish() can call bus.invoke() and the
+    request envelope continues the published event's session context when
+    session propagation is enabled.
+    """
+    bus = Bus.new(
+        WithAgentID("test-agent"),
+        WithTransport(InMemoryDriver()),
+        WithSessionPropagation(True),
+    )
+    await bus.connect()
+    try:
+        async def inner_handler(_: Envelope) -> dict:
+            return {
+                "trace_id": session.trace_id(),
+                "session_id": session.session_id(),
+                "conversation_id": session.conversation_id(),
+                "traceparent": session.current().traceparent if session.current() else None,
+            }
+
+        await bus.handle_invoke("svc", inner_handler)
+
+        seen: list[dict] = []
+
+        async def subscriber(_: Envelope) -> None:
+            resp = await bus.invoke("svc", {"text": "hello"})
+            seen.append(resp.payload_json())
+
+        sub = await bus.subscribe("matrix.message.received", subscriber)
+        try:
+            event = Envelope.new("matrix.message.received")
+            event.trace_id = "trace-matrix"
+            event.session_id = "sess-matrix"
+            event.conversation_id = "conv-matrix"
+            event.traceparent = "00-abc-def-01"
+            await bus.publish(event)
+            await asyncio.sleep(0.05)
+
+            assert len(seen) == 1
+            assert seen[0] == {
+                "trace_id": "trace-matrix",
+                "session_id": "sess-matrix",
+                "conversation_id": "conv-matrix",
+                "traceparent": "00-abc-def-01",
+            }
+        finally:
+            await sub.unsubscribe()
+    finally:
+        await bus.close()
+
+
+async def test_nested_invoke_inherits_session() -> None:
+    """An invoke handler that calls bus.invoke() propagates session context
+    when session propagation is enabled.
+    """
+    bus = Bus.new(
+        WithAgentID("test-agent"),
+        WithTransport(InMemoryDriver()),
+        WithMiddleware(Trace()),
+        WithSessionPropagation(True),
+    )
+    await bus.connect()
+    try:
+        async def inner_handler(_: Envelope) -> dict:
+            env = session.current()
+            return {
+                "trace_id": env.trace_id if env else None,
+                "session_id": env.session_id if env else None,
+                "conversation_id": env.conversation_id if env else None,
+            }
+
+        await bus.handle_invoke("inner", inner_handler)
+
+        async def outer_handler(_: Envelope) -> dict:
+            return (await bus.invoke("inner", {"text": "hello"})).payload_json()
+
+        await bus.handle_invoke("outer", outer_handler)
+
+        req = Envelope.new("test.outer")
+        req.trace_id = "trace-outer"
+        req.session_id = "sess-outer"
+        req.conversation_id = "conv-outer"
+        resp = await bus.invoke("outer", req)
+        assert resp.payload_json() == {
+            "trace_id": "trace-outer",
+            "session_id": "sess-outer",
+            "conversation_id": "conv-outer",
+        }
+    finally:
+        await bus.close()
+
+
+async def test_session_propagation_disabled_by_default() -> None:
+    """By default, the bus does not inject session context or propagate it to
+    nested invoke calls. Trace() middleware remains the explicit opt-in way to
+    get session.current() inside handlers.
+    """
+    bus = Bus.new(
+        WithAgentID("test-agent"),
+        WithTransport(InMemoryDriver()),
+    )
+    await bus.connect()
+    try:
+        outer_context: list[Envelope | None] = []
+
+        async def inner_handler(_: Envelope) -> dict:
+            env = session.current()
+            return {
+                "trace_id": env.trace_id if env else None,
+                "session_id": env.session_id if env else None,
+            }
+
+        await bus.handle_invoke("inner", inner_handler)
+
+        async def outer_handler(_: Envelope) -> dict:
+            outer_context.append(session.current())
+            return (await bus.invoke("inner", {"text": "hello"})).payload_json()
+
+        await bus.handle_invoke("outer", outer_handler)
+
+        req = Envelope.new("test.outer")
+        req.trace_id = "trace-outer"
+        req.session_id = "sess-outer"
+        resp = await bus.invoke("outer", req)
+        assert resp.payload_json() == {
+            "trace_id": None,
+            "session_id": None,
+        }
+        assert outer_context == [None]
     finally:
         await bus.close()
