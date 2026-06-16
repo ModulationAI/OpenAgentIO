@@ -36,6 +36,7 @@ class Options:
     middleware: list[Callable] = field(default_factory=list)
     envelope_preparers: list[EnvelopePreparer] = field(default_factory=list)
     default_timeout: float = 30.0
+    propagate_session_context: bool = False
 
 
 Option = Callable[[Options], None]
@@ -92,6 +93,21 @@ def WithEnvelopePreparer(*preparers: EnvelopePreparer) -> Option:
 def WithDefaultTimeout(d: float) -> Option:
     def apply(o: Options) -> None:
         o.default_timeout = d
+    return apply
+
+
+def WithSessionPropagation(propagate: bool = True) -> Option:
+    """Control whether nested ``invoke`` / ``stream_invoke`` inherit session,
+    conversation, and trace fields from the currently dispatched envelope.
+
+    Default is ``False`` to preserve existing core bus semantics; enable when
+    you want handlers triggered by external bridges to share context with
+    downstream calls.
+    """
+
+    def apply(o: Options) -> None:
+        o.propagate_session_context = propagate
+
     return apply
 
 

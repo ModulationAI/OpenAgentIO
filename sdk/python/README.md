@@ -20,6 +20,10 @@ sdk/python/
 └── examples/
     ├── echo_agent.py
     ├── custom_bridge.py
+    ├── mcp_bridge.yaml
+    ├── mcp_quickstart.py
+    ├── matrix_bridge.yaml
+    ├── matrix_quickstart.py
     └── openclaw_quickstart.py
 ```
 
@@ -239,6 +243,114 @@ results are returned as `agent.response.final` envelopes.
 
 **Not yet supported:** full MCP host/runtime, resources as event streams,
 prompts, sampling, roots, or bidirectional session features.
+
+## Matrix Event Quickstart
+
+Bridge Matrix room text messages into OpenAgentIO publish/subscribe events. This
+is an **event bridge**, not a full Matrix client: it maps `m.room.message` /
+`m.text` events to `matrix.message.received` and sends `matrix.message.send`
+events back to Matrix rooms.
+
+Supported:
+
+- Text messages in configured rooms.
+- Inbound `matrix.message.received` events with `session_id`, `conversation_id`,
+  `correlation_id`, and `matrix.*` metadata.
+- Outbound `matrix.message.send` events to a `room_id`.
+- `room` and `room_sender` session strategies.
+- Sync-loop reconnect, backoff, and health state.
+
+Not supported:
+
+- E2EE, media, reactions, redactions, federation, presence, typing, or full
+  membership management.
+
+Example bridge config (`examples/matrix_bridge.yaml`):
+
+```yaml
+version: "openagentio.bridge/v1"
+bridges:
+  - name: "matrix-main"
+    type: "matrix_event"
+    config:
+      homeserver_url: "https://matrix.example.com"
+      access_token: "your-access-token"
+      user_id: "@bot:example.com"
+      room_ids:
+        - "!roomid:example.com"
+      sync_timeout: 30
+      reconnect_delay: 2
+      initial_sync_behavior: "skip"
+      outbound_msgtype: "m.text"
+    mappings:
+      event_prefix: "matrix"
+      inbound_message_event: "matrix.message.received"
+      outbound_message_event: "matrix.message.send"
+      session_strategy: "room"
+```
+
+Run the quickstart to listen for messages:
+
+```bash
+env PYTHONPATH=src .venv/bin/python examples/matrix_quickstart.py \
+    --config examples/matrix_bridge.yaml
+```
+
+Send one message back to a room:
+
+```bash
+env PYTHONPATH=src .venv/bin/python examples/matrix_quickstart.py \
+    --config examples/matrix_bridge.yaml \
+    --send "hello from OpenAgentIO" \
+    --room "!roomid:example.com"
+```
+
+Load the same config programmatically:
+
+```python
+from openagentio import (
+    Bus,
+    InMemoryDriver,
+    WithAgentID,
+    WithSessionPropagation,
+    WithTransport,
+)
+from openagentio.bridge import BUILTIN_FACTORIES, BridgeConfig
+from openagentio.bridge.runner import BridgeRunner
+
+bus = Bus.new(
+    WithAgentID("my-app"),
+    WithTransport(InMemoryDriver()),
+    WithSessionPropagation(True),  # share session/trace with nested invoke/stream
+)
+await bus.connect()
+
+config = BridgeConfig.from_file("examples/matrix_bridge.yaml")
+runner = BridgeRunner(bus, config, BUILTIN_FACTORIES)
+await runner.start()
+
+# React to Matrix messages.
+async def on_message(env):
+    payload = env.payload_json()
+    print(payload["room_id"], payload["sender"], payload["text"])
+
+await bus.subscribe("matrix.message.received", on_message)
+```
+
+### Session and trace propagation for Matrix handlers
+
+If a Matrix inbound handler calls `bus.invoke()` or `bus.stream_invoke()`,
+create the Bus with `WithSessionPropagation(True)` so the new request inherits
+`session_id`, `conversation_id`, `trace_id`, `span_id`, and `traceparent` from
+the Matrix event. Without this option, nested calls start with a fresh context.
+
+### Matrix bridge scope
+
+**Supported:** text room message events in both directions.
+
+**Not yet supported:** E2EE, media upload/download, federation, reactions,
+redactions, thread/reply semantics, presence, typing, or automatic room
+membership management.
 
 ## Protocol
 

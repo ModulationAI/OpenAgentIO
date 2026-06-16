@@ -17,6 +17,7 @@ from openagentio.bridge.config import (
     BridgeDefinition,
     BridgeMappings,
 )
+from openagentio.bridge.matrix_event import MatrixEventBridge, matrix_event_factory
 from openagentio.bridge.mcp_tool import McpToolBridge, mcp_tool_factory
 from openagentio.bridge.openclaw_chat_sse import (
     OpenClawChatBridge,
@@ -29,6 +30,7 @@ from openagentio.bridge.runner import BridgeRunner
 #: directly to :class:`BridgeRunner`, or merge their own custom
 #: factories on top of it.
 BUILTIN_FACTORIES: dict[str, BridgeFactory] = {
+    "matrix_event": matrix_event_factory,
     "mcp_tool": mcp_tool_factory,
     "openclaw_chat_sse": openclaw_chat_sse_factory,
 }
@@ -42,10 +44,12 @@ __all__ = [
     "BridgeFactory",
     "BridgeMappings",
     "BridgeRunner",
+    "MatrixEventBridge",
     "McpToolBridge",
     "OpenClawChatBridge",
     "OpenClawChatSSEBridge",
     "SUPPORTED_VERSION",
+    "matrix_event_factory",
     "mcp_tool_factory",
     "openclaw_chat_sse_factory",
 ]

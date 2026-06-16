@@ -12,6 +12,7 @@ subscribe/handle_invoke/handle_stream dispatch paths, mirroring the Go SDK.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 from typing import Any, Awaitable, Callable
 
@@ -45,6 +46,7 @@ from openagentio.event.types import (
     is_terminal,
 )
 from openagentio.middleware import Chain, Handler as MiddlewareHandler, Middleware
+import openagentio.session as _session
 from openagentio.transport.base import (
     RawMessage,
     Subscription as TransportSubscription,
@@ -105,11 +107,14 @@ class Bus:
         self._transport = opts.transport
         self._logger = opts.logger or logging.getLogger("openagentio")
         self._default_timeout = opts.default_timeout
+        self._propagate_session_context = opts.propagate_session_context
         self._envelope_preparers = opts.envelope_preparers
 
-        # Middleware chain: bus-level middleware only. Users must explicitly
-        # include Trace() via WithMiddleware(Trace()) if they want session
-        # propagation, mirroring the Go SDK where Trace is opt-in.
+        # Session context propagation is opt-in via WithSessionPropagation(True).
+        # When enabled, the bus injects the inbound envelope before dispatching
+        # handlers and copies session/conversation/trace fields into nested
+        # invoke/stream requests. WithMiddleware(Trace()) remains supported as the
+        # older explicit injection mechanism; the two can be combined safely.
         self._middleware: list[Middleware] = list(opts.middleware)
 
         self._owned: list[TransportSubscription] = []
@@ -184,10 +189,16 @@ class Bus:
             except Exception as e:  # noqa: BLE001
                 self._logger.warning("bus: decode error: %s", e)
                 return
+            token: contextvars.Token | None = None
+            if self._propagate_session_context:
+                token = _session.inject(env)
             try:
                 await wrapped(env)
             except Exception as e:  # noqa: BLE001
                 self._logger.warning("bus: handler error after middleware: %s", e)
+            finally:
+                if token is not None:
+                    _session.reset(token)
 
         sub = await self._transport.subscribe(subject, sub_opts.queue, dispatch)
         self._track_owned(sub)
@@ -271,10 +282,16 @@ class Bus:
 
         wrapped = Chain(invoke_handler_adapter, *self._middleware)
         user_err: BaseException | None = None
+        token: contextvars.Token | None = None
+        if self._propagate_session_context:
+            token = _session.inject(req)
         try:
             await wrapped(req)
         except BaseException as e:  # noqa: BLE001
             user_err = e
+        finally:
+            if token is not None:
+                _session.reset(token)
 
         if not req.reply_to:
             if user_err is not None:
@@ -393,10 +410,16 @@ class Bus:
 
         wrapped = Chain(stream_handler_adapter, *self._middleware)
         herr: BaseException | None = None
+        token: contextvars.Token | None = None
+        if self._propagate_session_context:
+            token = _session.inject(req)
         try:
             await wrapped(req)
         except BaseException as e:  # noqa: BLE001
             herr = e
+        finally:
+            if token is not None:
+                _session.reset(token)
 
         if writer.closed:
             return
@@ -430,6 +453,8 @@ class Bus:
                 env.to = target
             if not env.tenant_id:
                 env.tenant_id = self._tenant
+            if self._propagate_session_context:
+                self._inherit_session_context(env)
             return env
 
         env = Envelope.new(MessageReceived)
@@ -438,7 +463,33 @@ class Bus:
         env.tenant_id = self._tenant
         if payload is not None:
             env.payload = self._codec.encode_payload(payload)
+        if self._propagate_session_context:
+            self._inherit_session_context(env)
         return env
+
+    def _inherit_session_context(self, env: Envelope) -> None:
+        """Copy trace/session fields from the currently dispatched envelope.
+
+        When a handler triggered by an inbound event calls ``invoke`` or
+        ``stream_invoke``, the new request should continue the same session,
+        conversation, and trace context unless the caller explicitly supplied
+        them. We intentionally do NOT inherit ``correlation_id`` or ``user_id``
+        here because those carry request-specific or business semantics that may
+        not belong on a nested invocation.
+        """
+        current = _session.current()
+        if current is None:
+            return
+        if not env.session_id:
+            env.session_id = current.session_id
+        if not env.conversation_id:
+            env.conversation_id = current.conversation_id
+        if not env.trace_id:
+            env.trace_id = current.trace_id
+        if not env.span_id:
+            env.span_id = current.span_id
+        if not env.traceparent:
+            env.traceparent = current.traceparent
 
     def _final_response(self, req: Envelope, payload: Any) -> Envelope:
         resp = new_reply_shell(self._agent_id, req, ResponseFinal)
