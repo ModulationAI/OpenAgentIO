@@ -68,16 +68,15 @@ Goal: Go remains the canonical reference implementation. Other languages follow 
 - Complete golden sample tests as the cross-language specification baseline.
 - Stabilize middleware interfaces (Recover, Trace, Logging, Retry, DeadLetter).
 
-### v0.3 — Python SDK Restart
-**Restart conditions** (all must be met):
-1. Go v0.2 released with API freeze announcement.
-2. Core golden sample tests pass stably for 2+ weeks.
-3. `schema/envelope.schema.json` and `pkg/event/golden_test.go` accepted as the single source of truth.
+### v0.3 — Python SDK Alignment (Active)
+The Python SDK has successfully resumed active development and has achieved parity for core Bus features (Publish, Subscribe, Invoke, StreamInvoke) along with the first developer preview of the Bridge layer (Matrix, MCP, and HTTP/SSE).
 
 **Python v0.3 scope**:
-- Parity with Go v0.2: Bus (Publish/Subscribe/Invoke/StreamInvoke), in-memory + NATS transports, session context propagation.
-- Middleware chain: Recover, Trace, Logging (Retry/DLQ deferred to v0.4).
-- HTTP/SSE adapter parity optional (v0.4).
+- Complete parity with Go SDK scenarios (including OTel tracing example scenarios).
+- Complete Bridge implementations: `McpToolBridge` and `MatrixEventBridge` (Developer Preview v0.3-alpha).
+- Complete standard middleware chain: Recover, Trace, Logging.
+- HTTP/SSE adapter parity.
+
 
 ### v0.4 — Java SDK Evaluation
 - Evaluate JVM ecosystem demand.
