@@ -13,54 +13,57 @@ Conversation-Aware Runtime Bus for Distributed AI Agents
 
 ---
 
-OpenAgentIO is a lightweight runtime bus for distributed AI agents.
+OpenAgentIO is a lightweight, bridgeable runtime bus and bridge layer for heterogeneous agent systems.
 
-It gives distributed agents one runtime API for invoke, streaming, pub/sub, async tasks, session propagation, and trace propagation, while allowing the underlying protocol model to evolve with open agent communication ideas.
+It maps third-party protocols, tools, and message networks (such as MCP servers, Matrix rooms, and HTTP/SSE streaming endpoints) into one runtime bus model. By translating external protocols into structured `Invoke`, `StreamInvoke`, and `Publish/Subscribe` flows, OpenAgentIO provides cross-process, cross-language agent collaboration with session propagation and OpenTelemetry tracing context.
 
-OpenAgentIO is designed for conversational distributed systems: systems where agents, workers, tools, and runtimes exchange long-lived context across requests, streams, and events.
+> [!NOTE]
+> **Developer Preview:** OpenAgentIO is under active development. The bridge layer and multi-language SDKs are currently available as an early developer preview (v0.3-alpha).
 
-The project focuses on the runtime communication substrate beneath agent systems, rather than planning, workflows, RAG, prompt orchestration, or model-specific agent logic.
+---
 
-
-## Why OpenAgentIO?
-
-Modern AI systems are no longer single agents running inside one process.
-
-They are:
-- distributed
-- event-driven
-- streaming-native
-- cross-runtime
-- multi-agent
-- conversation-oriented
-
-Yet most frameworks primarily focus on:
-- prompting
-- workflows
-- tool calling
+## What is OpenAgentIO?
 
  <img src="https://github.com/ModulationAI/openagentio/blob/main/assets/show.png?raw=true" alt="openagentio show">
 
+Modern AI systems are no longer single agents running inside one process. They are distributed, multi-agent networks containing heterogeneous workers, tools, and platforms.
 
-OpenAgentIO focuses on the runtime communication layer for AI agents and agent-adjacent workers.
+Yet, most agent frameworks focus on prompting, single-runtime orchestration, or local tool execution. OpenAgentIO serves as a **runtime integration layer** underneath, normalizing how these components talk, stream, trace, and maintain sessions.
 
-It treats conversational context and lifecycle state as part of the runtime contract, not as application-level afterthoughts. Requests, streams, async task updates, and events stay connected through protocol-level context propagation and lifecycle semantics, while the concrete wire shape can evolve as OpenAgentIO absorbs stronger open-protocol ideas.
+### A Bridgeable Integration Layer
 
-Designed for distributed runtime collaboration, OpenAgentIO enables agents, workers, and runtimes to communicate consistently across different transports, languages, and execution environments.
+OpenAgentIO does not define how your agents talk to the world; it defines how they collaborate internally. It does not replace existing agent standards, but bridges them:
+
+*   **MCP (Model Context Protocol)**: MCP defines how applications expose tools and context to LLMs and agents. OpenAgentIO bridges MCP servers, exposing their tools as native Bus `Invoke` targets.
+*   **Matrix Event Network**: Matrix handles decentralized chats and message federation. OpenAgentIO bridges Matrix room messages into pub/sub Bus events, and routes agent outputs back.
+*   **HTTP/SSE Gateways**: OpenAgentIO bridges OpenAI-compatible streaming endpoints (like OpenClaw) into unified `StreamInvoke` lifecycles.
+
+```text
+       External Protocols / Platforms (MCP, Matrix, SSE Gateways)
+                                    │
+                                    ▼  (Bridges)
+                         [ OpenAgentIO Bridge Layer ]
+                                    │
+                                    ▼  (Normalize)
+                      [ OpenAgentIO Runtime Bus (Go/Python) ]
+         (Invoke / StreamInvoke / Publish / Subscribe / Session / Trace)
+                                    │
+                                    ▼
+       Your Router Agents, Worker Agents, Task Processors, Background Jobs
+```
 
 ## OpenAgentIO is NOT another Agent Framework
 
-Agent frameworks and OpenAgentIO solve different layers of the AI runtime stack.
+OpenAgentIO solves the communication and observability substrate of the AI runtime stack, rather than agent logic itself.
 
-| Agent Frameworks             | OpenAgentIO                 |
-| ---------------------------- | --------------------------- |
-| Workflow orchestration       | Runtime communication       |
-| Prompt orchestration         | Runtime interoperability    |
-| Tool execution               | Distributed messaging       |
-| Single runtime coordination  | Cross-runtime collaboration |
-| Agent logic                  | Agent networking            |
-| Task pipelines               | Streaming communication     |
-| In-process workflows         | Distributed runtime systems |
+| Agent Frameworks (e.g. LangGraph, CrewAI) | OpenAgentIO (Bridgeable Runtime Bus) |
+| ----------------------------------------- | ------------------------------------- |
+| Workflow orchestration & DAGs             | Runtime communication substrate      |
+| Prompt engineering & Agent logic          | Runtime interoperability              |
+| Single-process workflow state             | Distributed messaging & routing       |
+| In-process task pipelines                 | Cross-runtime collaboration           |
+| Tool execution runtimes                   | Event-driven & streaming bridge layer |
+
 
 
 ## Why Conversational Distributed Systems?
@@ -139,26 +142,26 @@ The goal is to provide a small, explicit, and composable communication substrate
 
 ## Relationship to A2A
 
-OpenAgentIO is not an alternative to A2A. A2A is an emerging interoperability protocol for agents;OpenAgentIO focuses on the runtime substrate that carries agent communication patterns inside distributed systems.
+OpenAgentIO is not an alternative to A2A. A2A is an emerging interoperability protocol for agents; OpenAgentIO focuses on the runtime substrate that carries agent communication patterns inside distributed systems.
 As the A2A ecosystem evolves, OpenAgentIO intends to absorb compatible ideas around:
    - task lifecycle semantics
    - streaming event models
    - interoperability patterns
 
-while keeping the runtime model composable across different transport backends.sport-neutral.
+while keeping the runtime model composable across different transport backends.
 
 ## Roadmap
 
 > [!WARNING]
-> OpenAgentIO is under active development and currently in the early 0.2 stage.
+> OpenAgentIO is under active development and currently in the 0.3-alpha developer preview stage.
 >
-> The project is being rapidly refined around runtime communication APIs, protocol design, and cross-runtime interoperability.
+> The project is being rapidly refined around runtime communication APIs, bridge integrations, protocol design, and cross-runtime interoperability.
 >
-> A more stable and officially usable 0.3 release is expected in early June 2026.
+> The bridge layer is usable for experimentation and integration demos, but should not yet be treated as a production-ready service mesh or full protocol runtime.
 
 - v0.1: Go runtime, envelope schema, in-memory transport, NATS Core transport, invoke and streaming APIs.
 - v0.2.x: HTTP/SSE adapter, Python SDK, session/trace propagation, OpenTelemetry bridge, retry / dead-letter middleware.
-- v0.3.x: Reliability, protocol state cleanup, first multi-language SDK.
+- v0.3.x: Developer-preview bridge layer for MCP tools, Matrix events, and HTTP/SSE streaming gateways.
 - v0.4.x: Advanced orchestration scenes, control plane foundation.
 - v1.0.x: stable runtime message schema, cross-language compatibility, and production deployment guidance.
 
