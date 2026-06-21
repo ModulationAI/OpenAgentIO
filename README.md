@@ -9,6 +9,26 @@ OpenAgentIO
 Conversation-Aware Runtime Bus for Distributed AI Agents
 </h5>
 
+<p>
+  <img src="https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge" alt="license" />
+
+  <img src="https://img.shields.io/badge/status-pre--release-orange?style=for-the-badge" alt="status" />
+
+  <img src="https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go" />
+
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=FFD43B" alt="Python" />
+
+  <img src="https://img.shields.io/badge/TypeScript-5.x+-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+
+  <img src="https://img.shields.io/badge/Protocol-OpenAgentIO-F4B400?style=for-the-badge" alt="Protocol" />
+
+  <img src="https://img.shields.io/badge/Multi--Agent-Ready-7E57C2?style=for-the-badge" alt="Multi-Agent" />
+
+  <img src="https://img.shields.io/badge/Event--Driven-Architecture-FF7043?style=for-the-badge" alt="Event-Driven" />
+
+  <img src="https://img.shields.io/badge/Observability-Built--In-009688?style=for-the-badge" alt="Observability" />
+</p>
+
 <div align="center">Build conversational distributed systems with streaming, events, sessions, and traces. </div></div>
 
 ---
