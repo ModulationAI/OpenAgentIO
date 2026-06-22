@@ -37,6 +37,8 @@ OpenAgentIO is a lightweight, bridgeable runtime bus and bridge layer for hetero
 
 It maps third-party protocols, tools, and message networks (such as MCP servers, Matrix rooms, and HTTP/SSE streaming endpoints) into one runtime bus model. By translating external protocols into structured `Invoke`, `StreamInvoke`, and `Publish/Subscribe` flows, OpenAgentIO provides cross-process, cross-language agent collaboration with session propagation and OpenTelemetry tracing context.
 
+https://github.com/user-attachments/assets/8f34c956-d405-4c87-8461-eaa48eeacfe5
+
 > [!NOTE]
 > **Developer Preview:** OpenAgentIO is under active development. The bridge layer and multi-language SDKs are currently available as an early developer preview (v0.3-alpha).
 
