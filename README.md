@@ -2,9 +2,7 @@
 <p align="center">
 <img src="https://raw.githubusercontent.com/ModulationAI/openagentio/refs/heads/main/assets/OpenAgentIO.png" width="700" height="350" alt="openagentio preview">
 
-<h3 align="center">
-OpenAgentIO
-</h3>
+
 <h5 align="center">
 Conversation-Aware Runtime Bus for Distributed AI Agents
 </h5>
@@ -136,16 +134,7 @@ Distributed Agent Communication Complexity
 
 For details, please refer to [OpenAgentIO SDK Examples](https://github.com/ModulationAI/OpenAgentIO-example)
 
-## Scenario Demo
 
-[![OpenAgentIO Scenario-1](./assets/s1.gif)]()
-[![OpenAgentIO Scenario-2](./assets/s2.gif)]()
-[![OpenAgentIO Scenario-3](./assets/s3.gif)]()
-[![OpenAgentIO Scenario-4](./assets/s4.gif)]()
-[![OpenAgentIO Scenario-5](./assets/s5.gif)]()
-[![OpenAgentIO Scenario-6](./assets/s6.gif)]()
-[![OpenAgentIO Scenario-7](./assets/s7.gif)]()
-[![OpenAgentIO Scenario-8](./assets/s8.gif)]()
 
 ## Design Philosophy
 OpenAgentIO focuses on the communication runtime layer for distributed AI agents.
