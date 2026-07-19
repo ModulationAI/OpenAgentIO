@@ -24,7 +24,8 @@ sdk/python/
     ├── mcp_quickstart.py
     ├── matrix_bridge.yaml
     ├── matrix_quickstart.py
-    └── openclaw_quickstart.py
+    ├── openclaw_quickstart.py
+    └── qwenpaw_quickstart.py
 ```
 
 ## Install (development)
@@ -106,6 +107,46 @@ bridge = OpenClawChatBridge.from_env(bus, target="openclaw.chat")
 await bridge.start()
 
 async for env in await bus.stream_invoke("openclaw.chat", {"text": "你好"}):
+    print(env.payload_json())
+```
+
+## QwenPaw Quickstart
+
+For a local QwenPaw deployment exposing the `POST /api/console/chat` SSE
+endpoint:
+
+```bash
+# QwenPaw ships on port 8088; the base URL defaults to http://127.0.0.1:8088,
+# so no env vars are required for a local no-auth setup.
+export QWENPAW_BASE_URL=http://127.0.0.1:8088     # optional (default shown)
+# export QWENPAW_AUTH_TOKEN=your-token            # remote / login auth only
+
+env PYTHONPATH=src .venv/bin/python examples/qwenpaw_quickstart.py "你好"
+```
+
+The quickstart sends one OpenAgentIO `stream_invoke()` request to the
+`qwenpaw_chat_sse` bridge and prints QwenPaw's streamed response. The first
+version supports only `stream_invoke()` (streaming) - there is no
+non-streaming `bus.invoke()` path.
+
+QwenPaw skips Web login auth for `127.0.0.1` / `::1` requests, so
+`QWENPAW_AUTH_TOKEN` may be empty for local development. Set it when talking
+to a remote instance or one with login authentication enabled.
+
+Application code can use the same bridge without constructing low-level
+bridge config objects:
+
+```python
+from openagentio import Bus, InMemoryDriver
+from openagentio.bridge import QwenPawChatBridge
+
+bus = Bus(agent_id="my-app", transport=InMemoryDriver())
+await bus.connect()
+
+bridge = QwenPawChatBridge.from_env(bus, target="qwenpaw.chat")
+await bridge.start()
+
+async for env in await bus.stream_invoke("qwenpaw.chat", {"text": "你好"}):
     print(env.payload_json())
 ```
 
