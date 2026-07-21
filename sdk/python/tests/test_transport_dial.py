@@ -1,9 +1,11 @@
 """Transport dial helper tests."""
 from __future__ import annotations
 
+import asyncio
 import os
 
 from openagentio import InMemoryDriver, NATSDriver, dial, WithNATSName
+from openagentio.transport.nats import NATSDriver as _NATSDriver
 
 
 async def test_dial_inmem() -> None:
@@ -93,6 +95,29 @@ async def test_dial_nats_connect_failure_wraps_error() -> None:
     finally:
         del os.environ["OPENAGENTIO_TRANSPORT"]
         del os.environ["NATS_URL"]
+
+
+async def test_nats_driver_connect_respects_connect_timeout() -> None:
+    """NATSDriver.connect must not exceed connect_timeout on unreachable hosts.
+
+    Regression: nats-py's internal reconnect loop can otherwise stall dial for
+    ~120s (max_reconnect_attempts * reconnect_time_wait). The outer wait_for in
+    NATSDriver.connect bounds the entire initial dial. Any regression here
+    reappears as pytest-suite hangs (see remediation checklist P0 #1).
+    """
+    driver = _NATSDriver(url="nats://no-such-host:4222", connect_timeout=1.0)
+    loop = asyncio.get_event_loop()
+    start = loop.time()
+    try:
+        await driver.connect()
+    except (TimeoutError, Exception):  # noqa: BLE001 — either wrap is fine
+        pass
+    finally:
+        elapsed = loop.time() - start
+        await driver.close()
+    # 1.0s budget + generous slack for CI schedulers; hard-fail well under the
+    # 120s worst-case that we are guarding against.
+    assert elapsed < 5.0, f"connect took {elapsed:.2f}s, expected < 5s"
 
 
 async def test_dial_nats_name_ignored_for_inmem() -> None:

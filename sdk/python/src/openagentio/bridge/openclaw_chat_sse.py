@@ -194,9 +194,15 @@ class OpenClawChatSSEBridge(Bridge):
                 timeout=httpx.Timeout(self._request_timeout),
             )
             self._own_client = True
-        self._stream_sub = await self._bus.handle_stream(
-            self._definition.name, self._on_stream
-        )
+        try:
+            self._stream_sub = await self._bus.handle_stream(
+                self._definition.name, self._on_stream
+            )
+        except Exception:
+            # Roll back the httpx client we just created — otherwise a failed
+            # start() leaks it on non-BridgeRunner callers.
+            await self.stop()
+            raise
         self._logger.info(
             "openclaw chat sse bridge ready: target=%s url=%s model=%s",
             self._definition.name,
@@ -217,7 +223,12 @@ class OpenClawChatSSEBridge(Bridge):
         client = self._client
         self._client = None
         if client is not None and self._own_client:
-            await client.aclose()
+            try:
+                await client.aclose()
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                self._logger.exception(
+                    "openclaw chat sse bridge: failed to close HTTP client"
+                )
 
     # -- request handler ----------------------------------------------------
 

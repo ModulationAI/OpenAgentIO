@@ -21,6 +21,12 @@ var ErrNotImplemented = errors.New("bus: not implemented (v0.1 skeleton)")
 // frames exceeds the InvokeOption WithIdleTimeout deadline.
 var ErrIdleTimeout = errors.New("bus: stream idle timeout")
 
+// ErrBackpressureDrop is reported by a Stream when the client-side
+// out-of-order buffer would exceed WithMaxPendingFrames, or when a received
+// frame's Seq jumps more than WithMaxSequenceGap ahead of the currently
+// expected Seq. This maps to the BACKPRESSURE_DROP error code on the wire.
+var ErrBackpressureDrop = errors.New("bus: stream backpressure drop")
+
 // New constructs a Bus from the supplied options. It validates the required
 // inputs (Transport, AgentID) and connects the underlying transport.
 func New(opts ...Option) (Bus, error) {

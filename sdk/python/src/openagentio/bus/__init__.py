@@ -30,6 +30,8 @@ from openagentio.bus.options import (
     WithHandleQueue,
     WithIdleTimeout,
     WithLogger,
+    WithMaxPendingFrames,
+    WithMaxSequenceGap,
     WithMiddleware,
     WithQueue,
     WithSessionPropagation,
@@ -75,6 +77,8 @@ __all__ = [
     "InvokeOption",
     "WithTimeout",
     "WithIdleTimeout",
+    "WithMaxPendingFrames",
+    "WithMaxSequenceGap",
     "HandleOption",
     "WithHandleQueue",
     # Errors.

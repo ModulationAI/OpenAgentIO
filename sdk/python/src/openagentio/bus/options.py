@@ -138,9 +138,17 @@ def collect_sub_opts(opts: list[SubOption]) -> _SubOpts:
 class _InvokeOpts:
     timeout: float | None = None
     idle_timeout: float | None = None
+    max_pending_frames: int | None = None
+    max_sequence_gap: int | None = None
 
 
 InvokeOption = Callable[[_InvokeOpts], None]
+
+
+# Default backpressure limits for the client-side Stream reorder buffer.
+# Mirror pkg/bus/options.go DefaultMaxPendingFrames / DefaultMaxSequenceGap.
+DEFAULT_MAX_PENDING_FRAMES = 256
+DEFAULT_MAX_SEQUENCE_GAP = 1024
 
 
 def WithTimeout(d: float) -> InvokeOption:
@@ -152,6 +160,36 @@ def WithTimeout(d: float) -> InvokeOption:
 def WithIdleTimeout(d: float) -> InvokeOption:
     def apply(o: _InvokeOpts) -> None:
         o.idle_timeout = d
+    return apply
+
+
+def WithMaxPendingFrames(n: int) -> InvokeOption:
+    """Cap the client-side out-of-order buffer used by stream_invoke.
+
+    A frame arriving out of order is held in the buffer until the missing
+    lower-Seq frames arrive; when the buffer would exceed this limit and the
+    new frame is not the currently-expected Seq, the stream is terminated
+    with :class:`BackpressureDropError`. Zero or negative resets to the
+    default (256).
+    """
+    def apply(o: _InvokeOpts) -> None:
+        o.max_pending_frames = n
+    return apply
+
+
+def WithMaxSequenceGap(gap: int) -> InvokeOption:
+    """Cap how far ahead of the currently-expected Seq a received frame may be.
+
+    A frame with ``seq - expected >= gap`` terminates the stream with
+    :class:`BackpressureDropError` (subtraction order mirrors the Go SDK
+    where it also protects against uint64 wrap; Python ints are unbounded
+    but the two implementations stay line-for-line identical). Guards
+    against a buggy or malicious server injecting a huge Seq that would
+    otherwise sit indefinitely in the out-of-order buffer. Zero or
+    negative resets to the default (1024).
+    """
+    def apply(o: _InvokeOpts) -> None:
+        o.max_sequence_gap = gap
     return apply
 
 
