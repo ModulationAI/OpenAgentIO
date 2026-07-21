@@ -359,6 +359,8 @@ class Bus:
             codec=self._codec,
             idle_timeout=idle_timeout,
             deadline=deadline,
+            max_pending_frames=invoke_opts.max_pending_frames,
+            max_sequence_gap=invoke_opts.max_sequence_gap,
         )
 
     async def handle_stream(
@@ -421,15 +423,61 @@ class Bus:
             if token is not None:
                 _session.reset(token)
 
-        if writer.closed:
+        # Auto-terminal logic. Three cases:
+        #   * OPEN: handler returned without terminating — synth Final(None)
+        #     (or Error(herr) if the handler raised).
+        #   * FAILED: handler attempted Final/Error but publish or codec
+        #     failed. The peer is still waiting on a terminal frame; try one
+        #     more error frame (may or may not succeed).
+        #   * CLOSED / CLOSING: nothing to do (CLOSING should never persist
+        #     past a completed terminal call, but treat it defensively).
+        from openagentio.bus.stream import _WriterState
+
+        state = writer.state
+        if state is _WriterState.CLOSED:
             return
+
+        correlation_id = req.event_id
+        target = req.to or req.event_type
+
+        if state is _WriterState.FAILED:
+            fallback = herr or writer.last_error or RuntimeError(
+                "stream: terminal publish failed"
+            )
+            try:
+                await writer.error(fallback)
+            except BaseException as e:  # noqa: BLE001
+                self._logger.error(
+                    "bus: stream fallback error publish failed "
+                    "target=%s correlation_id=%s reply_to=%s handler_err=%s "
+                    "publish_err=%s",
+                    target,
+                    correlation_id,
+                    req.reply_to,
+                    herr,
+                    e,
+                )
+            return
+
+        # state is OPEN (or defensively CLOSING/unknown — treat as needing a
+        # terminal frame). Any exception from writer.final/error here is real:
+        # log with request identifiers instead of swallowing it silently.
         try:
             if herr is not None:
                 await writer.error(herr)
             else:
                 await writer.final(None)
-        except Exception as e:  # noqa: BLE001
-            self._logger.warning("bus: stream auto-finalize failed: %s", e)
+        except BaseException as e:  # noqa: BLE001
+            self._logger.error(
+                "bus: stream auto-terminal failed "
+                "target=%s correlation_id=%s reply_to=%s handler_err=%s "
+                "publish_err=%s",
+                target,
+                correlation_id,
+                req.reply_to,
+                herr,
+                e,
+            )
 
     # --- helpers ---------------------------------------------------------
 

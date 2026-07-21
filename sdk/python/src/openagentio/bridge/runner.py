@@ -12,6 +12,7 @@ registry in this phase per the dev roadmap (deferred to a later phase).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Mapping
 
@@ -20,6 +21,14 @@ from openagentio.bridge.config import BridgeConfig, BridgeConfigError
 
 if TYPE_CHECKING:  # pragma: no cover
     from openagentio.bus import Bus
+
+
+# Hard cap on how long a single bridge's stop() is allowed to run before the
+# runner moves on. Prevents one misbehaving bridge from pinning the whole
+# process during shutdown (see remediation checklist §1: "test process does
+# not exit"). Not exposed as an option yet — revisit if a real deployment
+# needs a longer teardown budget.
+_BRIDGE_STOP_TIMEOUT = 10.0
 
 
 class BridgeRunner:
@@ -93,12 +102,32 @@ class BridgeRunner:
         self._started = False
 
     async def _shutdown(self) -> None:
+        # Best-effort teardown: every bridge gets a chance to stop, even if a
+        # sibling raises. We catch broad Exception because a bridge's stop()
+        # may bubble transport-specific errors we don't want to hard-fail on.
+        # CancelledError from a bridge is treated as "that bridge is being
+        # cancelled" — we still keep going through the rest, then re-raise at
+        # the end so the caller's cancellation semantics are preserved.
+        cancelled: BaseException | None = None
         while self._bridges:
             name, bridge = self._bridges.pop()
             try:
-                await bridge.stop()
+                await asyncio.wait_for(bridge.stop(), timeout=_BRIDGE_STOP_TIMEOUT)
+            except asyncio.TimeoutError:
+                self._logger.error(
+                    "bridge stop timed out after %.1fs name=%s",
+                    _BRIDGE_STOP_TIMEOUT,
+                    name,
+                )
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+                self._logger.warning(
+                    "bridge stop cancelled name=%s (continuing shutdown)", name
+                )
             except Exception:  # noqa: BLE001 - best-effort cleanup
                 self._logger.exception("error stopping bridge name=%s", name)
+        if cancelled is not None:
+            raise cancelled
 
 
 __all__ = ["BridgeRunner"]

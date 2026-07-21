@@ -85,9 +85,19 @@ func WithQueue(q string) SubOption { return func(o *subOpts) { o.Queue = q } }
 type InvokeOption func(*invokeOpts)
 
 type invokeOpts struct {
-	Timeout     time.Duration
-	IdleTimeout time.Duration
+	Timeout          time.Duration
+	IdleTimeout      time.Duration
+	MaxPendingFrames int
+	MaxSequenceGap   uint64
 }
+
+// DefaultMaxPendingFrames caps how many out-of-order frames Stream.Events
+// keeps buffered while waiting for the missing Seq. See WithMaxPendingFrames.
+const DefaultMaxPendingFrames = 256
+
+// DefaultMaxSequenceGap caps how far ahead of the currently-expected Seq a
+// received frame may jump. See WithMaxSequenceGap.
+const DefaultMaxSequenceGap = 1024
 
 // WithTimeout sets the overall deadline for the invocation.
 func WithTimeout(d time.Duration) InvokeOption {
@@ -97,6 +107,28 @@ func WithTimeout(d time.Duration) InvokeOption {
 // WithIdleTimeout sets the maximum gap between two streaming frames.
 func WithIdleTimeout(d time.Duration) InvokeOption {
 	return func(o *invokeOpts) { o.IdleTimeout = d }
+}
+
+// WithMaxPendingFrames caps the client-side out-of-order buffer used by
+// StreamInvoke's iterator. A frame arriving out of order is held in the
+// buffer until the missing lower-Seq frames arrive; when the buffer would
+// exceed this limit and the new frame is not the currently-expected Seq,
+// the stream is terminated with BACKPRESSURE_DROP. Zero uses
+// DefaultMaxPendingFrames.
+func WithMaxPendingFrames(n int) InvokeOption {
+	return func(o *invokeOpts) { o.MaxPendingFrames = n }
+}
+
+// WithMaxSequenceGap caps how far ahead of the currently-expected Seq a
+// received frame may be. A frame with Seq - expected >= gap (subtraction
+// order matters — the client checks it that way to stay safe against
+// uint64 wrap when expected is near MaxUint64) terminates the stream with
+// BACKPRESSURE_DROP. This guards against an attacker or buggy server
+// injecting a huge Seq that would otherwise sit indefinitely in the
+// out-of-order buffer waiting for the missing frames. Zero uses
+// DefaultMaxSequenceGap.
+func WithMaxSequenceGap(gap uint64) InvokeOption {
+	return func(o *invokeOpts) { o.MaxSequenceGap = gap }
 }
 
 // HandleOption configures HandleInvoke / HandleStream.

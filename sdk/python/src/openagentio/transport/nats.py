@@ -42,7 +42,14 @@ class NATSDriver:
         self._lock = asyncio.Lock()
 
     async def connect(self) -> None:
-        """Idempotent: a second call while already connected is a no-op."""
+        """Idempotent: a second call while already connected is a no-op.
+
+        ``connect_timeout`` bounds the *entire* initial dial, including any
+        internal reconnect attempts nats-py performs when the first server(s)
+        are unreachable. Without this outer bound, a DNS failure fans out to
+        ``max_reconnect_attempts * reconnect_time_wait`` (~120s by default),
+        which manifests as the test suite appearing to hang.
+        """
         async with self._lock:
             if self._nc is not None:
                 return
@@ -52,7 +59,16 @@ class NATSDriver:
             }
             if self._name:
                 kwargs["name"] = self._name
-            self._nc = await nats.connect(**kwargs)
+            try:
+                self._nc = await asyncio.wait_for(
+                    nats.connect(**kwargs),
+                    timeout=self._connect_timeout,
+                )
+            except asyncio.TimeoutError as e:
+                raise TimeoutError(
+                    f"nats: connect to {self._url} timed out after "
+                    f"{self._connect_timeout:g}s"
+                ) from e
 
     async def close(self) -> None:
         """Drain in-flight handlers, then release the connection. Idempotent."""
