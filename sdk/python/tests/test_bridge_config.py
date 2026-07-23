@@ -203,3 +203,131 @@ class TestBridgeConfig:
         p.write_text(json.dumps(self._valid_doc()))
         cfg = BridgeConfig.from_file(p)
         assert cfg.bridges[0].name == "openclaw.wechat"
+
+
+# ---------------------------------------------------------------------------
+# Environment variable resolution
+# ---------------------------------------------------------------------------
+
+
+class TestResolveEnv:
+    def test_resolve_plain_placeholder(self, monkeypatch) -> None:
+        monkeypatch.setenv("OAI_TEST_URL", "https://example.com")
+        d = BridgeDefinition(
+            name="b",
+            type="t",
+            config={"base_url": "${OAI_TEST_URL}"},
+        )
+        resolved = d.resolve_env()
+        assert resolved.config["base_url"] == "https://example.com"
+        # Original is unchanged.
+        assert d.config["base_url"] == "${OAI_TEST_URL}"
+
+    def test_resolve_placeholder_with_default(self, monkeypatch) -> None:
+        monkeypatch.delenv("OAI_MISSING_VAR", raising=False)
+        d = BridgeDefinition(
+            name="b",
+            type="t",
+            config={"timeout": "${OAI_MISSING_VAR:-30}"},
+        )
+        resolved = d.resolve_env()
+        assert resolved.config["timeout"] == "30"
+
+    def test_resolve_default_can_be_empty(self, monkeypatch) -> None:
+        monkeypatch.delenv("OAI_MISSING_VAR", raising=False)
+        d = BridgeDefinition(
+            name="b",
+            type="t",
+            config={"token": "${OAI_MISSING_VAR:-}"},
+        )
+        resolved = d.resolve_env()
+        assert resolved.config["token"] == ""
+
+    def test_missing_var_without_default_raises(self, monkeypatch) -> None:
+        monkeypatch.delenv("OAI_MISSING_VAR", raising=False)
+        d = BridgeDefinition(
+            name="b",
+            type="t",
+            config={"token": "${OAI_MISSING_VAR}"},
+        )
+        with pytest.raises(BridgeConfigError, match="OAI_MISSING_VAR"):
+            d.resolve_env()
+
+    def test_non_string_value_passes_through(self, monkeypatch) -> None:
+        monkeypatch.delenv("OAI_NUM", raising=False)
+        d = BridgeDefinition(
+            name="b",
+            type="t",
+            config={"count": 42, "enabled": True},
+        )
+        resolved = d.resolve_env()
+        assert resolved.config["count"] == 42
+        assert resolved.config["enabled"] is True
+
+    def test_multiple_placeholders_in_one_value(self, monkeypatch) -> None:
+        monkeypatch.setenv("OAI_HOST", "gateway.example")
+        monkeypatch.setenv("OAI_PORT", "8080")
+        d = BridgeDefinition(
+            name="b",
+            type="t",
+            config={"url": "https://${OAI_HOST}:${OAI_PORT}/v1"},
+        )
+        resolved = d.resolve_env()
+        assert resolved.config["url"] == "https://gateway.example:8080/v1"
+
+    def test_resolve_env_on_config(self, monkeypatch) -> None:
+        monkeypatch.setenv("OAI_A", "alpha")
+        monkeypatch.setenv("OAI_B", "beta")
+        cfg = BridgeConfig(
+            version=SUPPORTED_VERSION,
+            bridges=(
+                BridgeDefinition(name="b1", type="t", config={"x": "${OAI_A}"}),
+                BridgeDefinition(name="b2", type="t", config={"y": "${OAI_B}"}),
+            ),
+        )
+        resolved = cfg.resolve_env()
+        assert resolved.bridges[0].config["x"] == "alpha"
+        assert resolved.bridges[1].config["y"] == "beta"
+        assert cfg.bridges[0].config["x"] == "${OAI_A}"
+
+    def test_resolve_nested_mapping_and_list(self, monkeypatch) -> None:
+        """MCP-style nested headers/env/args are resolved recursively."""
+        monkeypatch.setenv("MCP_TOKEN", "tok123")
+        monkeypatch.setenv("API_KEY", "key456")
+        monkeypatch.setenv("TOKEN", "tok789")
+        d = BridgeDefinition(
+            name="mcp",
+            type="mcp_tool",
+            config={
+                "headers": {"Authorization": "Bearer ${MCP_TOKEN}"},
+                "env": {"API_KEY": "${API_KEY}"},
+                "args": ["--token=${TOKEN}", "--verbose"],
+            },
+        )
+        resolved = d.resolve_env()
+        assert resolved.config["headers"]["Authorization"] == "Bearer tok123"
+        assert resolved.config["env"]["API_KEY"] == "key456"
+        assert resolved.config["args"] == ["--token=tok789", "--verbose"]
+        # Original is unchanged.
+        assert d.config["headers"]["Authorization"] == "Bearer ${MCP_TOKEN}"
+
+    def test_missing_var_in_nested_mapping_raises(self, monkeypatch) -> None:
+        monkeypatch.delenv("NESTED_SECRET", raising=False)
+        d = BridgeDefinition(
+            name="mcp",
+            type="mcp_tool",
+            config={"headers": {"Authorization": "Bearer ${NESTED_SECRET}"}},
+        )
+        with pytest.raises(BridgeConfigError, match="NESTED_SECRET"):
+            d.resolve_env()
+
+    def test_resolve_tuple_passthrough(self, monkeypatch) -> None:
+        monkeypatch.setenv("OAI_T", "tval")
+        d = BridgeDefinition(
+            name="b",
+            type="t",
+            config={"items": ("${OAI_T}", 42)},
+        )
+        resolved = d.resolve_env()
+        assert resolved.config["items"] == ("tval", 42)
+        assert isinstance(resolved.config["items"], tuple)

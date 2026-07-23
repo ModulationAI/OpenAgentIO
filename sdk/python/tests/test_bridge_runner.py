@@ -87,30 +87,41 @@ async def test_shutdown_bounds_slow_bridge_and_continues(bus) -> None:
     """
     slow = _RecorderBridge(stop_hangs=True)
     fast = _RecorderBridge()
+
+    # Use a short stop_timeout to keep the test fast. The production default
+    # is 10s; we test the mechanism, not the number.
     runner = BridgeRunner(
-        bus, _cfg("slow", "fast"), _factories({"slow": slow, "fast": fast})
+        bus,
+        _cfg("slow", "fast"),
+        _factories({"slow": slow, "fast": fast}),
+        stop_timeout=0.1,
     )
 
-    # Override the timeout to keep the test fast. The production default is
-    # 10s; we test the mechanism, not the number.
-    import openagentio.bridge.runner as runner_mod
-
-    original = runner_mod._BRIDGE_STOP_TIMEOUT
-    runner_mod._BRIDGE_STOP_TIMEOUT = 0.1
-    try:
-        await runner.start()
-        loop = asyncio.get_event_loop()
-        start = loop.time()
-        await runner.stop()
-        elapsed = loop.time() - start
-    finally:
-        runner_mod._BRIDGE_STOP_TIMEOUT = original
+    await runner.start()
+    loop = asyncio.get_event_loop()
+    start = loop.time()
+    await runner.stop()
+    elapsed = loop.time() - start
 
     # LIFO order: fast is stopped first (returns instantly), slow times out
     # after ~0.1s. Total budget: comfortably under 1s.
     assert elapsed < 1.0, f"stop took {elapsed:.2f}s, expected < 1s"
     assert fast.stopped == 1
     assert slow.stopped == 1
+
+
+async def test_stop_timeout_exposed(bus) -> None:
+    """BridgeRunner exposes the configured stop timeout."""
+    runner = BridgeRunner(bus, _cfg("a"), _factories({"a": _RecorderBridge()}))
+    assert runner.stop_timeout == 10.0
+
+    runner_fast = BridgeRunner(
+        bus,
+        _cfg("a"),
+        _factories({"a": _RecorderBridge()}),
+        stop_timeout=0.5,
+    )
+    assert runner_fast.stop_timeout == 0.5
 
 
 async def test_stop_is_idempotent(bus) -> None:
@@ -159,3 +170,30 @@ async def test_shutdown_reraises_cancelled_after_cleanup(bus) -> None:
     # Both must have been visited even though one raised CancelledError.
     assert a.stopped == 1
     assert b.stopped == 1
+
+
+async def test_start_failure_preserved_despite_cleanup_cancelled(bus) -> None:
+    """A CancelledError during rollback must not mask the original start exception."""
+    a = _RecorderBridge()
+    b = _RecorderBridge(
+        start_raises=RuntimeError("boom"),
+        stop_raises=asyncio.CancelledError(),
+    )
+    c = _RecorderBridge()
+    runner = BridgeRunner(bus, _cfg("a", "b", "c"), _factories({"a": a, "b": b, "c": c}))
+
+    with pytest.raises(RuntimeError, match="boom") as exc_info:
+        await runner.start()
+
+    # a was started and rolled back. b was tracked and stopped (its CancelledError
+    # must be suppressed). c was never reached.
+    assert a.stopped == 1
+    assert b.stopped == 1
+    assert c.stopped == 0
+
+    # The traceback must end at the original start() failure, not at the
+    # runner's re-raise point, confirming we used a bare raise.
+    import traceback
+    tb = traceback.extract_tb(exc_info.value.__traceback__)
+    assert tb[-1].filename == __file__
+    assert tb[-1].name == "start"
