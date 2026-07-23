@@ -5,8 +5,12 @@ The runner takes a *connected* :class:`openagentio.Bus` plus a parsed
 each bridge, calls ``start()`` on it, and exposes a ``stop()`` that tears
 them down in reverse order with best-effort cleanup.
 
-Concrete bridge implementations (HTTP/SSE, OpenAPI, ...) live in their own
-submodules and are wired in by the caller — the runner has no built-in
+The runner **does not own the Bus lifecycle**. Callers must connect the Bus
+before ``start()`` and close it after ``stop()``. The runner never calls
+``bus.close()``.
+
+Concrete bridge implementations (HTTP/SSE, MCP, Matrix, ...) live in their
+own submodules and are wired in by the caller — the runner has no built-in
 registry in this phase per the dev roadmap (deferred to a later phase).
 """
 
@@ -23,20 +27,39 @@ if TYPE_CHECKING:  # pragma: no cover
     from openagentio.bus import Bus
 
 
-# Hard cap on how long a single bridge's stop() is allowed to run before the
-# runner moves on. Prevents one misbehaving bridge from pinning the whole
+# Default cap on how long a single bridge's stop() is allowed to run before
+# the runner moves on. Prevents one misbehaving bridge from pinning the whole
 # process during shutdown (see remediation checklist §1: "test process does
-# not exit"). Not exposed as an option yet — revisit if a real deployment
-# needs a longer teardown budget.
-_BRIDGE_STOP_TIMEOUT = 10.0
+# not exit"). This default is preserved as a module constant for backward
+# compatibility; new code should prefer passing ``stop_timeout`` to
+# BridgeRunner.
+_DEFAULT_STOP_TIMEOUT = 10.0
 
 
 class BridgeRunner:
     """Owns the lifecycle of a set of bridges attached to a single Bus.
 
     The supplied ``bus`` must already be connected; the runner does not
-    create, connect, or close it. Callers continue to manage Bus lifecycle
-    through the existing public API.
+create, connect, or close it. Callers continue to manage Bus lifecycle
+through the existing public API.
+
+    Lifecycle ordering:
+
+    1. Construct ``BridgeRunner(bus, config, factories)``.
+    2. ``await runner.start()`` — bridges start in config order.
+    3. If any bridge fails during ``start()``, already-started bridges are
+       stopped in reverse order and the original exception is re-raised.
+    4. ``await runner.stop()`` — stops all bridges in reverse order.
+    5. ``await bus.close()`` — caller closes the Bus after the runner.
+
+    Stop semantics:
+
+    * Each bridge's ``stop()`` is bounded by ``stop_timeout`` seconds.
+    * A timeout is logged and the runner continues with the next bridge.
+    * Exceptions during ``stop()`` are logged and swallowed.
+    * If shutdown is cancelled, the ``CancelledError`` is captured, the
+      remaining bridges are still stopped, and the error is re-raised at the
+      end so the caller's cancellation semantics are preserved.
     """
 
     def __init__(
@@ -46,10 +69,12 @@ class BridgeRunner:
         factories: Mapping[str, BridgeFactory],
         *,
         logger: logging.Logger | None = None,
+        stop_timeout: float = _DEFAULT_STOP_TIMEOUT,
     ) -> None:
         self._bus = bus
         self._config = config
         self._factories = dict(factories)
+        self._stop_timeout = stop_timeout
         self._logger = logger or logging.getLogger("openagentio.bridge")
         self._bridges: list[tuple[str, Bridge]] = []
         self._started = False
@@ -58,6 +83,11 @@ class BridgeRunner:
     def bridges(self) -> tuple[tuple[str, Bridge], ...]:
         """Started bridges in start order, as ``(name, bridge)`` tuples."""
         return tuple(self._bridges)
+
+    @property
+    def stop_timeout(self) -> float:
+        """Per-bridge stop timeout in seconds."""
+        return self._stop_timeout
 
     async def start(self) -> None:
         """Instantiate and start every bridge in the config.
@@ -91,8 +121,19 @@ class BridgeRunner:
                 self._bridges.append((definition.name, bridge))
                 await bridge.start()
             self._started = True
-        except BaseException:
-            await self._shutdown()
+        except BaseException as start_exc:
+            # Best-effort rollback. A CancelledError raised by a bridge's
+            # stop() during rollback must not mask the original start failure;
+            # it is logged and suppressed so the caller receives the exception
+            # that actually caused start() to fail.
+            try:
+                await self._shutdown()
+            except asyncio.CancelledError:
+                self._logger.warning(
+                    "bridge stop raised CancelledError during start rollback; "
+                    "suppressing it so the original %s is preserved",
+                    type(start_exc).__name__,
+                )
             raise
 
     async def stop(self) -> None:
@@ -112,11 +153,11 @@ class BridgeRunner:
         while self._bridges:
             name, bridge = self._bridges.pop()
             try:
-                await asyncio.wait_for(bridge.stop(), timeout=_BRIDGE_STOP_TIMEOUT)
+                await asyncio.wait_for(bridge.stop(), timeout=self._stop_timeout)
             except asyncio.TimeoutError:
                 self._logger.error(
                     "bridge stop timed out after %.1fs name=%s",
-                    _BRIDGE_STOP_TIMEOUT,
+                    self._stop_timeout,
                     name,
                 )
             except asyncio.CancelledError as exc:

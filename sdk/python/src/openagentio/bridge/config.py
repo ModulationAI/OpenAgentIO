@@ -20,17 +20,36 @@ Supports the minimal YAML/JSON schema described in the v0.3.x roadmap:
 
 YAML loading uses :mod:`pyyaml`, exposed via the optional ``bridge`` extra
 (``pip install openagentio[bridge]``). JSON works with the stdlib only.
+
+Environment variable resolution
+-------------------------------
+
+String values anywhere inside ``config`` — including nested mappings, lists,
+and tuples — may contain placeholders of the form ``${VAR}`` or
+``${VAR:-default}``. Resolution is **opt-in** via
+:meth:`BridgeDefinition.resolve_env` / :meth:`BridgeConfig.resolve_env`;
+it is *not* performed automatically during parsing so that callers can
+inspect raw values and so that existing bridge-local resolution keeps
+working during transition.
+
+Missing variables without a default raise :class:`BridgeConfigError`.
+Non-string values pass through unchanged.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
 
 SUPPORTED_VERSION = "openagentio.bridge/v1"
+
+#: Pattern for ``${VAR}`` and ``${VAR:-default}`` placeholders.
+_ENV_PLACEHOLDER_RE = re.compile(r"\$\{(?P<name>[^}:]+)(?::-?(?P<default>[^}]*))?\}")
 
 
 class BridgeConfigError(ValueError):
@@ -101,6 +120,24 @@ class BridgeDefinition:
         mappings = BridgeMappings.from_dict(data.get("mappings"))
         return cls(name=name, type=kind, config=dict(raw_config), mappings=mappings)
 
+    def resolve_env(self) -> "BridgeDefinition":
+        """Return a new definition with environment-variable placeholders in
+        :attr:`config` resolved.
+
+        Resolution is opt-in and does not mutate this frozen instance.
+        Missing variables without a default raise :class:`BridgeConfigError`.
+        """
+        resolved = {
+            k: _resolve_env_placeholders(v, f"{self.name}.config.{k}")
+            for k, v in self.config.items()
+        }
+        return BridgeDefinition(
+            name=self.name,
+            type=self.type,
+            config=resolved,
+            mappings=self.mappings,
+        )
+
 
 @dataclass(frozen=True)
 class BridgeConfig:
@@ -153,6 +190,17 @@ class BridgeConfig:
                 data = json.loads(text)
         return cls.from_dict(data)
 
+    def resolve_env(self) -> "BridgeConfig":
+        """Return a new config with environment-variable placeholders resolved
+        in every bridge definition.
+
+        Resolution is opt-in and does not mutate this frozen instance.
+        """
+        return BridgeConfig(
+            version=self.version,
+            bridges=tuple(b.resolve_env() for b in self.bridges),
+        )
+
 
 class _YAMLUnavailable(RuntimeError):
     """Sentinel raised when pyyaml is not installed."""
@@ -167,6 +215,51 @@ def _load_yaml(text: str) -> Any:
             "Install the optional extra: pip install 'openagentio[bridge]'"
         ) from exc
     return yaml.safe_load(text)
+
+
+def _resolve_env_placeholders(value: Any, source_name: str) -> Any:
+    """Resolve ``${VAR}`` / ``${VAR:-default}`` placeholders recursively.
+
+    Strings are substituted. Mappings have their values resolved while keys
+    are preserved. Lists and tuples have their elements resolved. All other
+    values pass through unchanged. Missing variables without a default raise
+    :class:`BridgeConfigError`.
+    """
+    if isinstance(value, str):
+
+        def replacer(match: "re.Match[str]") -> str:
+            name = match.group("name")
+            default = match.group("default")
+            env_value = os.environ.get(name)
+            if env_value is not None:
+                return env_value
+            if default is not None:
+                return default
+            raise BridgeConfigError(
+                f"environment variable {name!r} is required by {source_name}"
+            )
+
+        return _ENV_PLACEHOLDER_RE.sub(replacer, value)
+
+    if isinstance(value, Mapping):
+        return {
+            k: _resolve_env_placeholders(v, f"{source_name}.{k}")
+            for k, v in value.items()
+        }
+
+    if isinstance(value, list):
+        return [
+            _resolve_env_placeholders(v, f"{source_name}[{i}]")
+            for i, v in enumerate(value)
+        ]
+
+    if isinstance(value, tuple):
+        return tuple(
+            _resolve_env_placeholders(v, f"{source_name}[{i}]")
+            for i, v in enumerate(value)
+        )
+
+    return value
 
 
 __all__ = [

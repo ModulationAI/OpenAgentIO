@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Formal Python Bridge SPI contract documented in `prompts/design.md` §9 and ADR-012.
+- `BridgeRunner` now accepts an optional `stop_timeout` parameter (default remains 10.0s).
+- `BridgeConfig.resolve_env()` and `BridgeDefinition.resolve_env()` for opt-in `${VAR}` / `${VAR:-default}` environment-variable placeholder resolution.
+
+### Changed
+
+- `prompts/design.md` renumbered: Python SDK design moved to §10, ecosystem/interop to §11, HTTP/SSE adapter to §12, etc.
+
+### Fixed
+
+- `BridgeRunner.start()` now preserves the original start exception when a bridge's `stop()` raises `CancelledError` during rollback cleanup.
+- `BridgeConfig.resolve_env()` / `BridgeDefinition.resolve_env()` now recursively resolve `${VAR}` / `${VAR:-default}` placeholders inside nested mappings, lists, and tuples.
+
 ## [0.2.3] - 2026-06-10
 
 ### Added
