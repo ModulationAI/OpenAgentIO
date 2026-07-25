@@ -12,15 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Formal Python Bridge SPI contract documented in `prompts/design.md` §9 and ADR-012.
 - `BridgeRunner` now accepts an optional `stop_timeout` parameter (default remains 10.0s).
 - `BridgeConfig.resolve_env()` and `BridgeDefinition.resolve_env()` for opt-in `${VAR}` / `${VAR:-default}` environment-variable placeholder resolution.
+- Active Event Source supervision: `EventSourceSupervisor`, `RestartPolicy`, `BridgeHealth`, `BridgeHealthSnapshot`, and `PermanentBridgeError`.
+- Optional `Bridge.health` hook and `BridgeRunner.health` aggregate snapshot so callers can observe bridge health.
 
 ### Changed
 
 - `prompts/design.md` renumbered: Python SDK design moved to §10, ecosystem/interop to §11, HTTP/SSE adapter to §12, etc.
+- `prompts/design.md` §9.11 and `prompts/adr-012-bridge-spi.md` updated to document active Event Source supervision semantics (`EventSourceSupervisor`, `RestartPolicy`, health snapshots, failure isolation).
+- `MatrixEventBridge` now delegates its background sync loop to `EventSourceSupervisor`, with optional `supervision` config for max restarts, exponential backoff, jitter, and health threshold.
 
 ### Fixed
 
 - `BridgeRunner.start()` now preserves the original start exception when a bridge's `stop()` raises `CancelledError` during rollback cleanup.
 - `BridgeConfig.resolve_env()` / `BridgeDefinition.resolve_env()` now recursively resolve `${VAR}` / `${VAR:-default}` placeholders inside nested mappings, lists, and tuples.
+- Active Event Source bridges (e.g., `MatrixEventBridge`) no longer silently stop when their background task exits, and no longer infinite-retry on permanent configuration/authentication errors.
+- `EventSourceSupervisor.stop()` now distinguishes child-task cancellation from caller cancellation and propagates external `asyncio.CancelledError`.
 
 ## [0.2.3] - 2026-06-10
 

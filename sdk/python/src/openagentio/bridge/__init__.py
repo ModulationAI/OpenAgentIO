@@ -18,6 +18,7 @@ from openagentio.bridge.config import (
     BridgeDefinition,
     BridgeMappings,
 )
+from openagentio.bridge.health import BridgeHealth, BridgeHealthSnapshot
 from openagentio.bridge.matrix_event import MatrixEventBridge, matrix_event_factory
 from openagentio.bridge.mcp_tool import McpToolBridge, mcp_tool_factory
 from openagentio.bridge.openclaw_chat_sse import (
@@ -30,7 +31,8 @@ from openagentio.bridge.qwenpaw_chat_sse import (
     QwenPawChatSSEBridge,
     qwenpaw_chat_sse_factory,
 )
-from openagentio.bridge.runner import BridgeRunner
+from openagentio.bridge.runner import BridgeRunner, RunnerHealthSnapshot
+from openagentio.bridge.supervisor import EventSourceSupervisor, RestartPolicy
 
 #: Built-in bridge type -> factory mapping. Callers can pass this
 #: directly to :class:`BridgeRunner`, or merge their own custom
@@ -49,14 +51,19 @@ __all__ = [
     "BridgeConfigError",
     "BridgeDefinition",
     "BridgeFactory",
+    "BridgeHealth",
+    "BridgeHealthSnapshot",
     "BridgeMappings",
     "BridgeRunner",
+    "EventSourceSupervisor",
     "MatrixEventBridge",
     "McpToolBridge",
     "OpenClawChatBridge",
     "OpenClawChatSSEBridge",
     "QwenPawChatBridge",
     "QwenPawChatSSEBridge",
+    "RestartPolicy",
+    "RunnerHealthSnapshot",
     "SUPPORTED_VERSION",
     "matrix_event_factory",
     "mcp_tool_factory",
