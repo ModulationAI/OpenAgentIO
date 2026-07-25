@@ -23,14 +23,21 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 import uuid
+import warnings
 from collections import deque
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlparse
 
 from openagentio.bridge.base import Bridge
 from openagentio.bridge.config import BridgeConfigError, BridgeDefinition
+from openagentio.bridge.health import BridgeHealth, BridgeHealthSnapshot
+from openagentio.bridge.supervisor import (
+    EventSourceSupervisor,
+    PermanentBridgeError,
+    RestartPolicy,
+    default_is_retryable,
+)
 from openagentio.bus.errors import (
     AgentTimeoutError,
     AgentUnavailableError,
@@ -248,7 +255,6 @@ class MatrixEventBridge(Bridge):
     _DEFAULT_SESSION_STRATEGY = "room"
 
     _MAX_RECONNECT_DELAY = 300.0
-    _HEALTH_FAILURE_THRESHOLD = 3
 
     def __init__(
         self,
@@ -321,20 +327,34 @@ class MatrixEventBridge(Bridge):
             label="mapping",
         )
 
+        supervision_cfg = cfg.get("supervision") or {}
+        self._supervision_policy = RestartPolicy(
+            max_restarts=int(supervision_cfg.get("max_restarts", 5)),
+            restart_window_seconds=float(
+                supervision_cfg.get("restart_window_seconds", 300)
+            ),
+            base_delay_seconds=float(
+                supervision_cfg.get("base_delay_seconds", self._reconnect_delay)
+            ),
+            max_delay_seconds=float(
+                supervision_cfg.get("max_delay_seconds", self._MAX_RECONNECT_DELAY)
+            ),
+            jitter_enabled=bool(supervision_cfg.get("jitter_enabled", True)),
+            health_failure_threshold=int(
+                supervision_cfg.get("health_failure_threshold", 3)
+            ),
+        )
+
         # Runtime state. The HTTP client is created on start() so construction
         # does not open network resources. Tests may inject a pre-configured
         # client via the ``client`` argument.
         self._client: httpx.AsyncClient | None = client
         self._own_client = client is None
         self._httpx: Any = None
-        self._sync_task: asyncio.Task[Any] | None = None
+        self._supervisor: EventSourceSupervisor | None = None
         self._subscriptions: list[Subscription] = []
         self._next_batch: str | None = None
         self._stopped = False
-        self._is_healthy = True
-        self._consecutive_sync_failures = 0
-        self._last_sync_error: BaseException | None = None
-        self._last_sync_at: float | None = None
         self._recent_event_ids: deque[str] = deque(maxlen=1000)
         self._recent_txn_ids: deque[str] = deque(maxlen=100)
         self._bridge_instance_id = uuid.uuid4().hex[:12]
@@ -361,7 +381,8 @@ class MatrixEventBridge(Bridge):
     # --- lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
-        """Start the bridge: create the HTTP client and register bus handlers.
+        """Start the bridge: create the HTTP client, register bus handlers,
+        and start the supervised sync loop.
 
         Calling :meth:`start` on an already-started bridge is a no-op so the
         lifecycle remains idempotent. If any startup step fails, already-created
@@ -387,7 +408,14 @@ class MatrixEventBridge(Bridge):
             )
             self._subscriptions.append(sub)
 
-            self._sync_task = asyncio.create_task(self._sync_loop())
+            self._supervisor = EventSourceSupervisor(
+                name=self._definition.name,
+                work=self._sync_loop,
+                policy=self._supervision_policy,
+                is_retryable=self._is_retryable,
+                logger=self._logger,
+            )
+            await self._supervisor.start()
 
             self._logger.info(
                 "matrix event bridge ready: name=%s homeserver=%s user=%s rooms=%d",
@@ -403,18 +431,14 @@ class MatrixEventBridge(Bridge):
     async def stop(self) -> None:
         """Stop the bridge and release resources. Safe to call multiple times."""
         self._stopped = True
-        self._is_healthy = False
 
-        task = self._sync_task
-        self._sync_task = None
-        if task is not None and not task.done():
-            task.cancel()
+        supervisor = self._supervisor
+        self._supervisor = None
+        if supervisor is not None:
             try:
-                await task
-            except asyncio.CancelledError:
-                pass
+                await supervisor.stop()
             except Exception:  # noqa: BLE001 - best-effort cleanup
-                self._logger.exception("matrix event bridge: sync task cleanup failed")
+                self._logger.exception("matrix event bridge: supervisor cleanup failed")
 
         while self._subscriptions:
             sub = self._subscriptions.pop()
@@ -432,6 +456,13 @@ class MatrixEventBridge(Bridge):
                 await client.aclose()
             except Exception:  # noqa: BLE001 - best-effort cleanup
                 self._logger.exception("matrix event bridge: failed to close HTTP client")
+
+    @property
+    def health(self) -> BridgeHealthSnapshot:
+        """Return the bridge's current health snapshot."""
+        if self._supervisor is not None:
+            return self._supervisor.health
+        return BridgeHealthSnapshot.unknown()
 
     # --- outbound Bus -> Matrix ----------------------------------------------
 
@@ -649,36 +680,35 @@ class MatrixEventBridge(Bridge):
     # --- inbound Matrix -> Bus -----------------------------------------------
 
     async def _sync_loop(self) -> None:
-        """Long-poll Matrix ``/sync`` and publish inbound room messages."""
-        while not self._stopped:
-            try:
-                await self._sync_once()
-                self._consecutive_sync_failures = 0
-                self._last_sync_error = None
-                self._last_sync_at = time.monotonic()
-                self._is_healthy = True
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - sync loop must survive
-                self._consecutive_sync_failures += 1
-                self._last_sync_error = exc
-                self._logger.exception("matrix event bridge: sync failed")
-                if self._consecutive_sync_failures >= self._HEALTH_FAILURE_THRESHOLD:
-                    self._is_healthy = False
+        """Long-poll Matrix ``/sync`` until the bridge is stopped.
 
-                retry_after_ms = getattr(exc, "retry_after_ms", None)
-                if isinstance(retry_after_ms, int) and retry_after_ms > 0:
-                    delay = min(self._MAX_RECONNECT_DELAY, retry_after_ms / 1000.0)
-                else:
-                    delay = min(
-                        self._MAX_RECONNECT_DELAY,
-                        self._reconnect_delay * (2 ** (self._consecutive_sync_failures - 1)),
-                    )
-                if not self._stopped:
-                    try:
-                        await asyncio.sleep(delay)
-                    except asyncio.CancelledError:
-                        break
+        Exceptions are allowed to propagate to the supervisor, which applies the
+        configured restart/backoff policy. This loop intentionally does not
+        sleep or catch errors so that supervision remains centralized.
+        """
+        while not self._stopped:
+            await self._sync_once()
+            if self._supervisor is not None:
+                self._supervisor.record_success()
+
+    def _is_retryable(self, exc: BaseException) -> bool:
+        """Classify Matrix sync errors for the supervisor.
+
+        Permanent errors (configuration, authentication, client-side request
+        errors) should not trigger an infinite retry loop. Everything else
+        (network, timeout, server errors, rate limits) is retryable.
+        """
+        if isinstance(
+            exc,
+            (
+                BridgeConfigError,
+                AuthFailureError,
+                InvalidRequestError,
+                PermanentBridgeError,
+            ),
+        ):
+            return False
+        return default_is_retryable(exc)
 
     async def _sync_once(self) -> None:
         """Perform one incremental ``/sync`` request and process the response."""
@@ -747,7 +777,7 @@ class MatrixEventBridge(Bridge):
             )
         if status >= 400:
             body = self._read_error_body(response)
-            raise TransportFailureError(
+            raise InvalidRequestError(
                 f"bridge '{self._definition.name}': Matrix sync rejected: "
                 f"HTTP {status} {body}"
             )
@@ -922,13 +952,35 @@ class MatrixEventBridge(Bridge):
 
     @property
     def is_healthy(self) -> bool:
-        """Return ``True`` if the sync loop is not in a failing streak."""
-        return self._is_healthy
+        """Return ``True`` if the sync loop is healthy.
+
+        .. deprecated::
+            Use :attr:`health` instead. This property is kept for backward
+            compatibility and may be removed in a future release.
+        """
+        warnings.warn(
+            "MatrixEventBridge.is_healthy is deprecated; use "
+            "MatrixEventBridge.health instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.health.health == BridgeHealth.HEALTHY
 
     @property
     def last_error(self) -> BaseException | None:
-        """Return the last sync error, if any."""
-        return self._last_sync_error
+        """Return the last sync error, if any.
+
+        .. deprecated::
+            Use :attr:`health` instead. This property is kept for backward
+            compatibility and may be removed in a future release.
+        """
+        warnings.warn(
+            "MatrixEventBridge.last_error is deprecated; use "
+            "MatrixEventBridge.health instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.health.last_error
 
 
 def matrix_event_factory(bus: "Bus", definition: BridgeDefinition) -> Bridge:

@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping
 
 from openagentio.bridge.base import Bridge, BridgeFactory
 from openagentio.bridge.config import BridgeConfig, BridgeConfigError
+from openagentio.bridge.health import BridgeHealth, BridgeHealthSnapshot
 
 if TYPE_CHECKING:  # pragma: no cover
     from openagentio.bus import Bus
@@ -34,6 +36,18 @@ if TYPE_CHECKING:  # pragma: no cover
 # compatibility; new code should prefer passing ``stop_timeout`` to
 # BridgeRunner.
 _DEFAULT_STOP_TIMEOUT = 10.0
+
+
+@dataclass(frozen=True)
+class RunnerHealthSnapshot:
+    """Aggregate health view across all bridges managed by a runner."""
+
+    overall: BridgeHealth
+    bridges: dict[str, BridgeHealthSnapshot]
+
+    def by_name(self, name: str) -> BridgeHealthSnapshot | None:
+        """Look up the health snapshot for a single bridge by name."""
+        return self.bridges.get(name)
 
 
 class BridgeRunner:
@@ -60,6 +74,11 @@ through the existing public API.
     * If shutdown is cancelled, the ``CancelledError`` is captured, the
       remaining bridges are still stopped, and the error is re-raised at the
       end so the caller's cancellation semantics are preserved.
+
+    Health:
+
+    * ``runner.health`` returns an aggregate snapshot with the worst per-bridge
+      state. A single unhealthy bridge does not stop the runner or its siblings.
     """
 
     def __init__(
@@ -78,6 +97,7 @@ through the existing public API.
         self._logger = logger or logging.getLogger("openagentio.bridge")
         self._bridges: list[tuple[str, Bridge]] = []
         self._started = False
+        self._last_logged_health: dict[str, BridgeHealth] = {}
 
     @property
     def bridges(self) -> tuple[tuple[str, Bridge], ...]:
@@ -88,6 +108,51 @@ through the existing public API.
     def stop_timeout(self) -> float:
         """Per-bridge stop timeout in seconds."""
         return self._stop_timeout
+
+    @property
+    def health(self) -> RunnerHealthSnapshot:
+        """Aggregate health snapshot across all bridges.
+
+        The ``overall`` field is the worst state among tracked bridges:
+        ``UNHEALTHY`` > ``DEGRADED`` > ``HEALTHY`` > ``UNKNOWN``. Transitions
+        to ``DEGRADED`` or ``UNHEALTHY`` are logged once per bridge to make
+        silent stops observable without affecting sibling bridges.
+        """
+        per_bridge: dict[str, BridgeHealthSnapshot] = {}
+        worst = BridgeHealth.UNKNOWN
+        severity = {
+            BridgeHealth.UNKNOWN: 0,
+            BridgeHealth.HEALTHY: 1,
+            BridgeHealth.DEGRADED: 2,
+            BridgeHealth.UNHEALTHY: 3,
+        }
+        for name, bridge in self._bridges:
+            snapshot = bridge.health
+            per_bridge[name] = snapshot
+            if severity[snapshot.health] > severity[worst]:
+                worst = snapshot.health
+
+            last = self._last_logged_health.get(name)
+            if snapshot.health != last:
+                self._last_logged_health[name] = snapshot.health
+                if snapshot.health in (BridgeHealth.DEGRADED, BridgeHealth.UNHEALTHY):
+                    self._logger.warning(
+                        "bridge health degraded name=%s health=%s message=%s "
+                        "consecutive_failures=%d restarts=%d",
+                        name,
+                        snapshot.health.value,
+                        snapshot.message,
+                        snapshot.consecutive_failures,
+                        snapshot.restarts_in_window,
+                    )
+                elif last in (BridgeHealth.DEGRADED, BridgeHealth.UNHEALTHY):
+                    self._logger.info(
+                        "bridge health recovered name=%s health=%s",
+                        name,
+                        snapshot.health.value,
+                    )
+
+        return RunnerHealthSnapshot(overall=worst, bridges=per_bridge)
 
     async def start(self) -> None:
         """Instantiate and start every bridge in the config.
@@ -171,4 +236,4 @@ through the existing public API.
             raise cancelled
 
 
-__all__ = ["BridgeRunner"]
+__all__ = ["BridgeRunner", "RunnerHealthSnapshot"]

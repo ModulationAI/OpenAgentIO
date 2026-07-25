@@ -12,13 +12,16 @@ listed in the P0 §1 remediation checklist:
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 import pytest
 
 from openagentio.bridge.base import Bridge
 from openagentio.bridge.config import BridgeConfig, BridgeDefinition
+from openagentio.bridge.health import BridgeHealth, BridgeHealthSnapshot
 from openagentio.bridge.runner import BridgeRunner
+from openagentio.bridge.supervisor import EventSourceSupervisor, RestartPolicy
 
 
 class _RecorderBridge(Bridge):
@@ -197,3 +200,115 @@ async def test_start_failure_preserved_despite_cleanup_cancelled(bus) -> None:
     tb = traceback.extract_tb(exc_info.value.__traceback__)
     assert tb[-1].filename == __file__
     assert tb[-1].name == "start"
+
+
+class _HealthBridge(Bridge):
+    """A bridge that reports a fixed health snapshot."""
+
+    def __init__(self, snapshot: BridgeHealthSnapshot) -> None:
+        self._snapshot = snapshot
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    @property
+    def health(self) -> BridgeHealthSnapshot:
+        return self._snapshot
+
+
+class _ActiveBridge(Bridge):
+    """A fake active bridge using EventSourceSupervisor."""
+
+    def __init__(self, work, policy: RestartPolicy) -> None:
+        self._work = work
+        self._policy = policy
+        self._supervisor: EventSourceSupervisor | None = None
+
+    async def start(self) -> None:
+        self._supervisor = EventSourceSupervisor(
+            "active", self._work, policy=self._policy
+        )
+        await self._supervisor.start()
+
+    async def stop(self) -> None:
+        if self._supervisor is not None:
+            await self._supervisor.stop()
+
+    @property
+    def health(self) -> BridgeHealthSnapshot:
+        if self._supervisor is not None:
+            return self._supervisor.health
+        return BridgeHealthSnapshot.unknown()
+
+
+async def test_health_reflects_worst_bridge_state(bus) -> None:
+    """Runner health aggregates per-bridge snapshots, worst wins."""
+    healthy = _HealthBridge(BridgeHealthSnapshot.healthy())
+    unhealthy = _HealthBridge(BridgeHealthSnapshot.unhealthy(message="bad"))
+    factories = {
+        "h": lambda _b, _d: healthy,
+        "u": lambda _b, _d: unhealthy,
+    }
+    runner = BridgeRunner(bus, _cfg("h", "u"), factories)
+    await runner.start()
+
+    snapshot = runner.health
+    assert snapshot.overall == BridgeHealth.UNHEALTHY
+    assert snapshot.by_name("h").health == BridgeHealth.HEALTHY
+    assert snapshot.by_name("u").health == BridgeHealth.UNHEALTHY
+
+    await runner.stop()
+
+
+async def test_health_detects_silent_stop(bus, caplog) -> None:
+    """A bridge whose supervised task exits cleanly is visible in runner health."""
+    caplog.set_level(logging.WARNING)
+    calls = 0
+
+    async def work() -> None:
+        nonlocal calls
+        calls += 1
+
+    policy = RestartPolicy(
+        max_restarts=1, base_delay_seconds=0.001, jitter_enabled=False
+    )
+    runner = BridgeRunner(
+        bus, _cfg("active"), {"active": lambda _b, _d: _ActiveBridge(work, policy)}
+    )
+    await runner.start()
+    await asyncio.sleep(0.05)
+
+    snapshot = runner.health
+    assert snapshot.overall in (BridgeHealth.DEGRADED, BridgeHealth.UNHEALTHY)
+    assert snapshot.by_name("active").restarts_in_window >= 1
+    assert any("bridge health degraded" in rec.message for rec in caplog.records)
+
+    await runner.stop()
+
+
+async def test_permanent_bridge_failure_does_not_affect_others(bus) -> None:
+    """One unhealthy bridge must not stop sibling bridges or the runner."""
+
+    async def work() -> None:
+        raise RuntimeError("fail")
+
+    policy = RestartPolicy(max_restarts=0, base_delay_seconds=0.001, jitter_enabled=False)
+    a = _ActiveBridge(work, policy)
+    b = _RecorderBridge()
+    factories = {
+        "active": lambda _b, _d: a,
+        "rec": lambda _b, _d: b,
+    }
+    runner = BridgeRunner(bus, _cfg("active", "rec"), factories)
+    await runner.start()
+    await asyncio.sleep(0.05)
+
+    assert runner.health.overall == BridgeHealth.UNHEALTHY
+    assert b.started is True
+    assert b.stopped == 0
+
+    await runner.stop()
+    assert b.stopped == 1

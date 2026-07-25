@@ -12,6 +12,7 @@ import pytest
 from openagentio import Bus, Envelope, InMemoryDriver
 from openagentio.bridge import (
     BUILTIN_FACTORIES,
+    BridgeHealth,
     BridgeRunner,
     MatrixEventBridge,
     matrix_event_factory,
@@ -1074,19 +1075,27 @@ class TestLifecycleAndHealth:
     async def test_stop_cancels_sync_task(self, bus: Bus) -> None:
         mock = MockMatrixHomeserver()
         bridge = await _start_bridge(bus, _bridge_def(), mock)
-        task = bridge._sync_task
+        supervisor = bridge._supervisor
+        assert supervisor is not None
+        task = supervisor._task
         assert task is not None and not task.done()
         await bridge.stop()
         assert task.done()
         assert task.cancelled()
-        assert bridge._sync_task is None
+        assert bridge._supervisor is None
         assert bridge._client is None
         assert len(bridge._subscriptions) == 0
 
     async def test_sync_loop_survives_sync_error(self, bus: Bus) -> None:
         mock = MockMatrixHomeserver()
         bridge = await _start_bridge(
-            bus, _bridge_def(initial_sync_behavior="replay", reconnect_delay=0.001), mock
+            bus,
+            _bridge_def(
+                initial_sync_behavior="replay",
+                reconnect_delay=0.001,
+                supervision={"max_restarts": 100, "jitter_enabled": False},
+            ),
+            mock,
         )
         try:
             await mock.wait_for_sync_request()
@@ -1109,7 +1118,13 @@ class TestLifecycleAndHealth:
     async def test_reconnect_preserves_next_batch(self, bus: Bus) -> None:
         mock = MockMatrixHomeserver()
         bridge = await _start_bridge(
-            bus, _bridge_def(initial_sync_behavior="skip", reconnect_delay=0.001), mock
+            bus,
+            _bridge_def(
+                initial_sync_behavior="skip",
+                reconnect_delay=0.001,
+                supervision={"max_restarts": 100, "jitter_enabled": False},
+            ),
+            mock,
         )
         try:
             await mock.wait_for_sync_request()
@@ -1137,10 +1152,15 @@ class TestLifecycleAndHealth:
     async def test_healthy_to_unhealthy_to_healthy(self, bus: Bus) -> None:
         mock = MockMatrixHomeserver()
         bridge = await _start_bridge(
-            bus, _bridge_def(reconnect_delay=0.001), mock
+            bus,
+            _bridge_def(
+                reconnect_delay=0.001,
+                supervision={"max_restarts": 100, "jitter_enabled": False},
+            ),
+            mock,
         )
         try:
-            assert bridge.is_healthy is True
+            assert bridge.health.health == BridgeHealth.HEALTHY
             await mock.wait_for_sync_request()
 
             mock.set_sync_error(500, "boom")
@@ -1148,14 +1168,14 @@ class TestLifecycleAndHealth:
                 mock.push_sync({})
                 await asyncio.sleep(0.02)
 
-            assert bridge.is_healthy is False
-            assert bridge.last_error is not None
+            assert bridge.health.health == BridgeHealth.UNHEALTHY
+            assert bridge.health.last_error is not None
 
             mock.clear_sync_error()
             mock.push_sync(_sync_response([], next_batch="batch1"))
             await asyncio.sleep(0.05)
-            assert bridge.is_healthy is True
-            assert bridge.last_error is None
+            assert bridge.health.health == BridgeHealth.HEALTHY
+            assert bridge.health.last_error is None
         finally:
             await bridge.stop()
 
@@ -1179,7 +1199,7 @@ class TestLifecycleAndHealth:
             mock.clear_sync_error()
             mock.push_sync(_sync_response([], next_batch="batch1"))
             await asyncio.sleep(0.05)
-            assert bridge.is_healthy is True
+            assert bridge.health.health == BridgeHealth.HEALTHY
         finally:
             await bridge.stop()
 
@@ -1197,7 +1217,146 @@ class TestLifecycleAndHealth:
                 await bridge.start()
             assert bridge._client is None
             assert len(bridge._subscriptions) == 0
-            assert bridge._sync_task is None
-            assert bridge.is_healthy is False
+            assert bridge._supervisor is None
+            assert bridge.health.health == BridgeHealth.UNKNOWN
         finally:
             bus.subscribe = original_subscribe  # type: ignore[method-assign]
+
+
+class TestSupervision:
+    async def test_sync_restart_cap(self, bus: Bus) -> None:
+        mock = MockMatrixHomeserver()
+        mock.set_sync_error(500, {"errcode": "M_UNKNOWN", "error": "server error"})
+        defn = _bridge_def(
+            supervision={
+                "max_restarts": 2,
+                "base_delay_seconds": 0.001,
+                "jitter_enabled": False,
+            }
+        )
+        bridge = MatrixEventBridge(
+            bus,
+            defn,
+            client=httpx.AsyncClient(transport=httpx.ASGITransport(app=mock.app)),
+        )
+        await bridge.start()
+        try:
+            await asyncio.sleep(0.1)
+            assert len(mock.sync_requests) == 3  # initial + 2 restarts
+            assert bridge.health.health == BridgeHealth.UNHEALTHY
+        finally:
+            await bridge.stop()
+
+    async def test_sync_auth_error_is_permanent(self, bus: Bus) -> None:
+        mock = MockMatrixHomeserver()
+        mock.set_sync_error(401, {"errcode": "M_UNKNOWN_TOKEN", "error": "bad token"})
+        defn = _bridge_def(
+            supervision={
+                "max_restarts": 10,
+                "base_delay_seconds": 0.001,
+            }
+        )
+        bridge = MatrixEventBridge(
+            bus,
+            defn,
+            client=httpx.AsyncClient(transport=httpx.ASGITransport(app=mock.app)),
+        )
+        await bridge.start()
+        try:
+            await asyncio.sleep(0.05)
+            assert len(mock.sync_requests) == 1
+            assert bridge.health.health == BridgeHealth.UNHEALTHY
+        finally:
+            await bridge.stop()
+
+    async def test_sync_429_uses_retry_after(self, bus: Bus) -> None:
+        mock = MockMatrixHomeserver()
+        mock.set_sync_error(
+            429,
+            {"errcode": "M_LIMIT_EXCEEDED", "error": "too fast", "retry_after_ms": 50},
+        )
+        defn = _bridge_def(
+            supervision={
+                "max_restarts": 1,
+                "base_delay_seconds": 60.0,
+                "jitter_enabled": False,
+            }
+        )
+        bridge = MatrixEventBridge(
+            bus,
+            defn,
+            client=httpx.AsyncClient(transport=httpx.ASGITransport(app=mock.app)),
+        )
+        await bridge.start()
+        try:
+            await mock.wait_for_sync_request()
+            loop = asyncio.get_event_loop()
+            start = loop.time()
+            await mock.wait_for_sync_request()
+            elapsed = loop.time() - start
+            assert 0.04 <= elapsed <= 0.15, f"elapsed={elapsed:.3f}s"
+            await asyncio.sleep(0.15)
+            assert bridge.health.health == BridgeHealth.UNHEALTHY
+        finally:
+            await bridge.stop()
+
+    async def test_stop_prevents_reconnect(self, bus: Bus) -> None:
+        mock = MockMatrixHomeserver()
+        mock.set_sync_error(
+            429,
+            {"errcode": "M_LIMIT_EXCEEDED", "error": "too fast", "retry_after_ms": 60000},
+        )
+        defn = _bridge_def(
+            supervision={
+                "max_restarts": 10,
+                "base_delay_seconds": 60.0,
+                "jitter_enabled": False,
+            }
+        )
+        bridge = MatrixEventBridge(
+            bus,
+            defn,
+            client=httpx.AsyncClient(transport=httpx.ASGITransport(app=mock.app)),
+        )
+        await bridge.start()
+        await mock.wait_for_sync_request()
+        await bridge.stop()
+        await asyncio.sleep(0.05)
+        assert len(mock.sync_requests) == 1
+
+    async def test_runner_stop_leaves_no_residual_task(self, bus: Bus) -> None:
+        mock = MockMatrixHomeserver()
+
+        def factory(b: Bus, defn: BridgeDefinition) -> MatrixEventBridge:
+            return MatrixEventBridge(
+                b, defn, client=httpx.AsyncClient(transport=httpx.ASGITransport(app=mock.app))
+            )
+
+        config = BridgeConfig.from_dict(
+            {
+                "version": "openagentio.bridge/v1",
+                "bridges": [
+                    {
+                        "name": "matrix-main",
+                        "type": "matrix_event",
+                        "config": {
+                            "homeserver_url": "https://matrix.example.com",
+                            "access_token": "secret",
+                            "user_id": "@agent:example.com",
+                            "room_ids": ["!room:example.com"],
+                        },
+                    }
+                ],
+            }
+        )
+        factories = dict(BUILTIN_FACTORIES)
+        factories["matrix_event"] = factory
+        runner = BridgeRunner(bus, config, factories)
+        await runner.start()
+        await runner.stop()
+
+        matrix_tasks = [
+            t for t in asyncio.all_tasks()
+            if "matrix-main" in (t.get_name() or "")
+        ]
+        assert not matrix_tasks, f"residual matrix tasks: {matrix_tasks}"

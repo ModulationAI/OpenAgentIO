@@ -15,6 +15,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable
 
+from openagentio.bridge.health import BridgeHealthSnapshot
+
 if TYPE_CHECKING:  # pragma: no cover - import only for typing
     from openagentio.bus import Bus
     from openagentio.bridge.config import BridgeDefinition
@@ -63,6 +65,17 @@ class Bridge(ABC):
         multiple times, and must unsubscribe every handler the bridge
         registered on the Bus.
         """
+
+    @property
+    def health(self) -> BridgeHealthSnapshot:
+        """Return a point-in-time health snapshot for this bridge.
+
+        Handler-style bridges that do not spawn background tasks do not need
+        to override this; the default returns ``UNKNOWN``. Active Event Source
+        bridges should report their health so callers and the
+        :class:`BridgeRunner` can observe failures.
+        """
+        return BridgeHealthSnapshot.unknown()
 
 
 # A factory takes a connected Bus and a parsed BridgeDefinition, and returns
