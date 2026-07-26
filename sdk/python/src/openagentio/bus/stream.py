@@ -406,6 +406,31 @@ def _inherit_metadata(src: dict[str, Any] | None) -> dict[str, Any] | None:
     return dst if dst else None
 
 
+def _merge_metadata(
+    inherited: dict[str, Any] | None, handler: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Combine inherited request metadata with handler-provided metadata.
+
+    Non-acp request keys are inherited; handler keys override inherited keys
+    for the same name. Runtime keys prefixed with ``acp.`` are never inherited
+    and are stripped from the handler overlay so they cannot leak upstream.
+    """
+    if inherited is None and handler is None:
+        return None
+    dst: dict[str, Any] = {}
+    if inherited is not None:
+        for k, v in inherited.items():
+            if k.startswith("acp."):
+                continue
+            dst[k] = v
+    if handler is not None:
+        for k, v in handler.items():
+            if k.startswith("acp."):
+                continue
+            dst[k] = v
+    return dst if dst else None
+
+
 def new_reply_shell(agent_id: str, req: Envelope, event_type: str) -> Envelope:
     """Pre-populate a response envelope with correlation metadata copied from req.
 

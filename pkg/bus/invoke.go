@@ -238,6 +238,30 @@ func inheritMetadata(src map[string]any) map[string]any {
 	return dst
 }
 
+// mergeMetadata combines inherited request metadata with handler-provided
+// metadata. Handler keys override inherited keys for the same name. Runtime
+// keys prefixed with "acp." are never inherited and are stripped from the
+// handler overlay so they cannot leak upstream.
+func mergeMetadata(inherited, handler map[string]any) map[string]any {
+	if inherited == nil && handler == nil {
+		return nil
+	}
+	dst := make(map[string]any)
+	for k, v := range inherited {
+		dst[k] = v
+	}
+	for k, v := range handler {
+		if strings.HasPrefix(k, "acp.") {
+			continue
+		}
+		dst[k] = v
+	}
+	if len(dst) == 0 {
+		return nil
+	}
+	return dst
+}
+
 // adoptResponse merges fields from the user-supplied response envelope with
 // correlation metadata from the request, preferring the user's values when
 // they are explicitly set. If the user envelope carries no metadata,
@@ -276,9 +300,7 @@ func adoptResponse(agentID string, req, user *event.Envelope) *event.Envelope {
 	if ft := event.FrameTypeForEventType(resp.EventType); ft != "" {
 		resp.FrameType = ft
 	}
-	if resp.Metadata == nil {
-		resp.Metadata = inheritMetadata(req.Metadata)
-	}
+	resp.Metadata = mergeMetadata(inheritMetadata(req.Metadata), resp.Metadata)
 	return resp
 }
 
