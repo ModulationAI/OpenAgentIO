@@ -64,7 +64,13 @@ func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
 // by the client (status 499 is informative only).
 func writeBusError(w http.ResponseWriter, err error) {
 	status, code := statusForBusError(err)
-	writeErrorJSON(w, status, code, err.Error())
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(event.ErrorPayload{
+		Code:      code,
+		Message:   err.Error(),
+		Retryable: code == event.CodeAgentTimeout,
+	})
 }
 
 // writeEnvelopeError unpacks an envelope whose EventType == ResponseError and

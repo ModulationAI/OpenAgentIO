@@ -156,6 +156,7 @@ class TestInvoke:
         body = resp.json()
         assert body["code"] == CodeAgentUnavailable
         assert "kaboom" in body["message"]
+        assert body["retryable"] is False
 
     @pytest.mark.asyncio
     async def test_invoke_maps_headers_to_envelope(self):
@@ -307,6 +308,7 @@ class TestStream:
         # Payload is embedded as structured value per Envelope.to_dict().
         payload = env["payload"]
         assert payload["code"] == CodeAgentTimeout
+        assert payload["retryable"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +343,9 @@ class TestAuth:
             resp = c.post("/v1/agents/x/invoke", json={})
         await bus.close()
         assert resp.status_code == 401
-        assert resp.json()["code"] == CodeAuthFailure
+        body = resp.json()
+        assert body["code"] == CodeAuthFailure
+        assert body["retryable"] is False
 
     @pytest.mark.asyncio
     async def test_auth_overrides_headers(self):

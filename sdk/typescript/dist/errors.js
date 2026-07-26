@@ -29,10 +29,28 @@ export class OpenAgentIOSSEError extends Error {
         super(message);
     }
 }
-export function isErrorPayload(value) {
+function isJsonObject(value) {
     return (typeof value === "object" &&
         value !== null &&
-        typeof value.code === "string" &&
-        typeof value.message === "string");
+        !Array.isArray(value));
+}
+export function isErrorPayload(value) {
+    if (typeof value !== "object" || value === null) {
+        return false;
+    }
+    const candidate = value;
+    if (typeof candidate.code !== "string") {
+        return false;
+    }
+    if (typeof candidate.message !== "string") {
+        return false;
+    }
+    if (typeof candidate.retryable !== "boolean") {
+        return false;
+    }
+    if ("cause" in candidate && candidate.cause !== undefined && !isJsonObject(candidate.cause)) {
+        return false;
+    }
+    return true;
 }
 //# sourceMappingURL=errors.js.map

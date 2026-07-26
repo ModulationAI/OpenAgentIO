@@ -20,6 +20,26 @@ export const FrameTypeResponseError = "response.error";
 export const FrameTypeToolCall = "tool.call";
 export const FrameTypeToolResult = "tool.result";
 
+// Standard error codes used by ErrorPayload. Wire-identical to Go/Python SDKs.
+export const CodeAgentTimeout = "AGENT_TIMEOUT" as const;
+export const CodeAgentUnavailable = "AGENT_UNAVAILABLE" as const;
+export const CodeBackpressureDrop = "BACKPRESSURE_DROP" as const;
+export const CodeTransportFailure = "TRANSPORT_FAILURE" as const;
+export const CodeCodecFailure = "CODEC_FAILURE" as const;
+export const CodeAuthFailure = "AUTH_FAILURE" as const;
+export const CodeInvalidRequest = "INVALID_REQUEST" as const;
+export const CodeNoHandler = "NO_HANDLER" as const;
+
+export type ErrorCode =
+  | typeof CodeAgentTimeout
+  | typeof CodeAgentUnavailable
+  | typeof CodeBackpressureDrop
+  | typeof CodeTransportFailure
+  | typeof CodeCodecFailure
+  | typeof CodeAuthFailure
+  | typeof CodeInvalidRequest
+  | typeof CodeNoHandler;
+
 export type StandardEventType =
   | typeof MessageReceived
   | typeof ResponseStarted
@@ -41,8 +61,8 @@ export type JsonArray = JsonValue[];
 export interface ErrorPayload {
   code: string;
   message: string;
-  retryable?: boolean;
-  details?: JsonValue;
+  retryable: boolean;
+  cause?: JsonObject;
 }
 
 export interface SSEMetadata {

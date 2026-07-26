@@ -16,6 +16,15 @@ export declare const FrameTypeResponseFinal = "response.final";
 export declare const FrameTypeResponseError = "response.error";
 export declare const FrameTypeToolCall = "tool.call";
 export declare const FrameTypeToolResult = "tool.result";
+export declare const CodeAgentTimeout: "AGENT_TIMEOUT";
+export declare const CodeAgentUnavailable: "AGENT_UNAVAILABLE";
+export declare const CodeBackpressureDrop: "BACKPRESSURE_DROP";
+export declare const CodeTransportFailure: "TRANSPORT_FAILURE";
+export declare const CodeCodecFailure: "CODEC_FAILURE";
+export declare const CodeAuthFailure: "AUTH_FAILURE";
+export declare const CodeInvalidRequest: "INVALID_REQUEST";
+export declare const CodeNoHandler: "NO_HANDLER";
+export type ErrorCode = typeof CodeAgentTimeout | typeof CodeAgentUnavailable | typeof CodeBackpressureDrop | typeof CodeTransportFailure | typeof CodeCodecFailure | typeof CodeAuthFailure | typeof CodeInvalidRequest | typeof CodeNoHandler;
 export type StandardEventType = typeof MessageReceived | typeof ResponseStarted | typeof ResponseDelta | typeof ResponseFinal | typeof ResponseError | typeof ToolCall | typeof ToolResult | typeof TaskCreated | typeof TaskCompleted;
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
@@ -26,8 +35,8 @@ export type JsonArray = JsonValue[];
 export interface ErrorPayload {
     code: string;
     message: string;
-    retryable?: boolean;
-    details?: JsonValue;
+    retryable: boolean;
+    cause?: JsonObject;
 }
 export interface SSEMetadata {
     event?: string;
