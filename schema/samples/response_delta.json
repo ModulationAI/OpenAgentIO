@@ -3,6 +3,7 @@
   "schema_version": 1,
   "event_id": "019de7eb-c0fe-7800-a000-000000000002",
   "event_type": "agent.response.delta",
+  "frame_type": "response.delta",
   "occurred_at": "2026-05-02T10:00:00.456Z",
   "from": "main-agent",
   "to": "user-gateway",

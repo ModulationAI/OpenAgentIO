@@ -33,7 +33,7 @@ from openagentio.event.payload import (
     CodeTransportFailure,
     ErrorPayload,
 )
-from openagentio.event.types import ResponseError, ResponseFinal
+from openagentio.event.types import FrameTypeResponseError, ResponseError, ResponseFinal
 
 from starlette.requests import Request
 from starlette.testclient import TestClient
@@ -303,6 +303,7 @@ class TestStream:
         assert last["retry"] == "3000"
         env = json.loads(last["data"])
         assert env["is_final"] == True
+        assert env["frame_type"] == FrameTypeResponseError
         # Payload is embedded as structured value per Envelope.to_dict().
         payload = env["payload"]
         assert payload["code"] == CodeAgentTimeout

@@ -14,6 +14,7 @@ type Envelope struct {
 
 	EventID    string    `json:"event_id"`
 	EventType  string    `json:"event_type"`
+	FrameType  string    `json:"frame_type,omitempty"`
 	OccurredAt time.Time `json:"occurred_at"`
 
 	TraceID        string `json:"trace_id,omitempty"`
@@ -59,7 +60,25 @@ func NewEvent(eventType string) *Envelope {
 // NewRequest creates an envelope for Invoke / StreamInvoke payloads.
 // It always uses MessageReceived as the event type.
 func NewRequest() *Envelope {
-	return New(MessageReceived)
+	env := New(MessageReceived)
+	env.FrameType = FrameTypeRequest
+	return env
+}
+
+// EffectiveFrameType returns the canonical frame_type for the envelope's
+// event_type when the event_type is a known protocol frame. For unknown
+// event_types it falls back to any explicit frame_type. This keeps old and new
+// consumers consistent: a known event_type always implies the same frame_type,
+// regardless of what a producer (or user code) may have written into the
+// frame_type field.
+func (e *Envelope) EffectiveFrameType() string {
+	if e == nil {
+		return ""
+	}
+	if ft := FrameTypeForEventType(e.EventType); ft != "" {
+		return ft
+	}
+	return e.FrameType
 }
 
 // Clone returns a shallow copy suitable for in-pipeline mutation. Payload bytes

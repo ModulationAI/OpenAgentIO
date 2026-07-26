@@ -40,9 +40,11 @@ from openagentio.codec.json_codec import Codec, JSONCodec
 from openagentio.event.envelope import Envelope
 from openagentio.event.payload import ErrorPayload
 from openagentio.event.types import (
+    FrameTypeRequest,
     MessageReceived,
     ResponseError,
     ResponseFinal,
+    frame_type_for_event_type,
     is_terminal,
 )
 from openagentio.middleware import Chain, Handler as MiddlewareHandler, Middleware
@@ -501,11 +503,14 @@ class Bus:
                 env.to = target
             if not env.tenant_id:
                 env.tenant_id = self._tenant
+            if not env.frame_type and env.event_type == MessageReceived:
+                env.frame_type = FrameTypeRequest
             if self._propagate_session_context:
                 self._inherit_session_context(env)
             return env
 
         env = Envelope.new(MessageReceived)
+        env.frame_type = FrameTypeRequest
         env.from_ = self._agent_id
         env.to = target
         env.tenant_id = self._tenant
@@ -577,6 +582,11 @@ class Bus:
             resp.traceparent = req.traceparent
         if not resp.is_final and is_terminal(resp.event_type):
             resp.is_final = True
+        # For known protocol event types, frame_type is canonical and must not
+        # contradict event_type. Derive it from event_type whenever a mapping exists.
+        ft = frame_type_for_event_type(resp.event_type)
+        if ft:
+            resp.frame_type = ft
         if resp.metadata is None:
             resp.metadata = _inherit_metadata(req.metadata)
         return resp

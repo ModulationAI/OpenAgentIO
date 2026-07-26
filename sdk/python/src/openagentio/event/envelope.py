@@ -23,6 +23,7 @@ class Envelope:
     schema_version: int = SCHEMA_VERSION
     event_id: str = field(default_factory=new_id)
     event_type: str = ""
+    frame_type: str = ""
     occurred_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     trace_id: str = ""
@@ -51,6 +52,17 @@ class Envelope:
         """Construct an Envelope with a fresh UUIDv7 event_id and current UTC time."""
         return cls(event_type=event_type)
 
+    @classmethod
+    def new_request(cls) -> "Envelope":
+        """Construct a request envelope for Invoke / StreamInvoke.
+
+        Equivalent to ``Envelope.new(MessageReceived)`` but also sets the
+        experimental ``frame_type`` to ``request``.
+        """
+        from openagentio.event.types import FrameTypeRequest, MessageReceived
+
+        return cls(event_type=MessageReceived, frame_type=FrameTypeRequest)
+
     def clone(self) -> "Envelope":
         """Shallow copy. Metadata dict is copied; payload bytes are shared."""
         cp = replace(self)
@@ -73,6 +85,8 @@ class Envelope:
             "event_type": self.event_type,
             "occurred_at": _format_time(self.occurred_at),
         }
+        if self.frame_type:
+            d["frame_type"] = self.frame_type
         if self.trace_id:
             d["trace_id"] = self.trace_id
         if self.span_id:
@@ -115,6 +129,7 @@ class Envelope:
             schema_version=data.get("schema_version", SCHEMA_VERSION),
             event_id=data.get("event_id", ""),
             event_type=data.get("event_type", ""),
+            frame_type=data.get("frame_type", "") or "",
             occurred_at=_parse_time(data.get("occurred_at")),
             trace_id=data.get("trace_id", "") or "",
             span_id=data.get("span_id", "") or "",

@@ -93,6 +93,61 @@ func TestBuildRequestEnvelopeDefaultsToNewRequest(t *testing.T) {
 	if env.EventType != event.MessageReceived {
 		t.Fatalf("event_type = %q want %q", env.EventType, event.MessageReceived)
 	}
+	if env.FrameType != event.FrameTypeRequest {
+		t.Fatalf("frame_type = %q want %q", env.FrameType, event.FrameTypeRequest)
+	}
+}
+
+func TestBuildRequestEnvelopeFillsMissingFrameTypeForMessageReceived(t *testing.T) {
+	tr := inmem.New()
+	b, err := New(
+		WithAgentID("test-agent"),
+		WithTransport(tr),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	db := b.(*defaultBus)
+
+	// A user-constructed envelope with MessageReceived but no frame_type should
+	// be backfilled so older/manual envelopes still dual-write frame_type.
+	env := event.New(event.MessageReceived)
+	if env.FrameType != "" {
+		t.Fatal("test setup: expected empty frame_type")
+	}
+	out, err := db.buildRequestEnvelope("echo", env)
+	if err != nil {
+		t.Fatalf("buildRequestEnvelope: %v", err)
+	}
+	if out.FrameType != event.FrameTypeRequest {
+		t.Fatalf("frame_type = %q want %q", out.FrameType, event.FrameTypeRequest)
+	}
+}
+
+func TestBuildRequestEnvelopePreservesUserFrameType(t *testing.T) {
+	tr := inmem.New()
+	b, err := New(
+		WithAgentID("test-agent"),
+		WithTransport(tr),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	db := b.(*defaultBus)
+
+	env := event.New(event.MessageReceived)
+	env.FrameType = "custom.frame"
+	out, err := db.buildRequestEnvelope("echo", env)
+	if err != nil {
+		t.Fatalf("buildRequestEnvelope: %v", err)
+	}
+	if out.FrameType != "custom.frame" {
+		t.Fatalf("frame_type = %q want %q", out.FrameType, "custom.frame")
+	}
 }
 
 func TestBuildRequestEnvelopeNilLoggerDoesNotPanic(t *testing.T) {
@@ -120,5 +175,44 @@ func TestBuildRequestEnvelopeNilLoggerDoesNotPanic(t *testing.T) {
 	_, err = db.buildRequestEnvelope("echo", env)
 	if err != nil {
 		t.Fatalf("buildRequestEnvelope: %v", err)
+	}
+}
+
+func TestNewReplyShell_SetsFrameType(t *testing.T) {
+	req := event.NewRequest()
+	resp := newReplyShell("agent", req, event.ResponseDelta)
+	if resp.FrameType != event.FrameTypeResponseDelta {
+		t.Fatalf("frame_type = %q want %q", resp.FrameType, event.FrameTypeResponseDelta)
+	}
+}
+
+func TestAdoptResponse_BackfillsFrameType(t *testing.T) {
+	req := event.NewRequest()
+	user := event.New(event.ResponseFinal)
+	user.FrameType = "" // explicit empty, as if constructed by old code
+	resp := adoptResponse("agent", req, user)
+	if resp.FrameType != event.FrameTypeResponseFinal {
+		t.Fatalf("frame_type = %q want %q", resp.FrameType, event.FrameTypeResponseFinal)
+	}
+}
+
+func TestAdoptResponse_EnforcesCanonicalFrameTypeForKnownEventType(t *testing.T) {
+	req := event.NewRequest()
+	user := event.New(event.ResponseFinal)
+	user.FrameType = "custom.response.final"
+	resp := adoptResponse("agent", req, user)
+	// Known protocol event types must not carry a contradictory frame_type.
+	if resp.FrameType != event.FrameTypeResponseFinal {
+		t.Fatalf("frame_type = %q want %q", resp.FrameType, event.FrameTypeResponseFinal)
+	}
+}
+
+func TestAdoptResponse_PreservesUserFrameTypeForUnknownEventType(t *testing.T) {
+	req := event.NewRequest()
+	user := event.New("goc.incident.created")
+	user.FrameType = "custom.frame"
+	resp := adoptResponse("agent", req, user)
+	if resp.FrameType != "custom.frame" {
+		t.Fatalf("frame_type = %q want %q", resp.FrameType, "custom.frame")
 	}
 }

@@ -19,7 +19,7 @@ from openagentio.event.payload import (
     CodeInvalidRequest,
     ErrorPayload,
 )
-from openagentio.event.types import ResponseError
+from openagentio.event.types import FrameTypeResponseError, ResponseError
 
 from openagentio.adapter.http.auth import AuthContext
 from openagentio.adapter.http.envelope import read_envelope
@@ -175,6 +175,7 @@ def _format_sse_error(exc: BaseException, retry_ms: int = 0) -> bytes:
     if isinstance(exc, (asyncio.TimeoutError, ErrIdleTimeout)):
         code = CodeAgentTimeout
     frame = Envelope.new(ResponseError)
+    frame.frame_type = FrameTypeResponseError
     frame.is_final = True
     payload = ErrorPayload(code=code, message=str(exc))
     frame.payload = json.dumps({"code": payload.code, "message": payload.message}).encode("utf-8")

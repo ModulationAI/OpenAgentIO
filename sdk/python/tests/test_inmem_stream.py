@@ -11,6 +11,10 @@ from openagentio import (
     CodeAgentUnavailable,
     Envelope,
     ErrIdleTimeout,
+    FrameTypeRequest,
+    FrameTypeResponseDelta,
+    FrameTypeResponseFinal,
+    FrameTypeResponseStarted,
     ResponseDelta,
     ResponseError,
     ResponseFinal,
@@ -48,6 +52,75 @@ async def test_stream_invoke_happy_path(bus: Bus) -> None:
         ResponseFinal,
     ]
     assert seqs == [0, 1, 2, 3, 4]
+
+
+async def test_stream_frames_include_frame_type(bus: Bus) -> None:
+    async def handler(_: Envelope, w: StreamWriter) -> None:
+        await w.started(None)
+        await w.delta({"chunk": 1})
+        await w.final(None)
+
+    await bus.handle_stream("typed", handler)
+
+    s = await bus.stream_invoke("typed", None)
+    frames: list[Envelope] = []
+    try:
+        async for env in s:
+            frames.append(env)
+    finally:
+        await s.close()
+
+    assert len(frames) == 3
+    assert frames[0].frame_type == FrameTypeResponseStarted
+    assert frames[1].frame_type == FrameTypeResponseDelta
+    assert frames[2].frame_type == FrameTypeResponseFinal
+
+
+async def test_stream_request_envelope_includes_frame_type(bus: Bus) -> None:
+    captured: Envelope | None = None
+
+    async def handler(req: Envelope, w: StreamWriter) -> None:
+        nonlocal captured
+        captured = req
+        await w.final(None)
+
+    await bus.handle_stream("req-type", handler)
+
+    s = await bus.stream_invoke("req-type", {"msg": "hi"})
+    try:
+        async for _ in s:
+            pass
+    finally:
+        await s.close()
+
+    assert captured is not None
+    assert captured.frame_type == FrameTypeRequest
+
+
+async def test_invoke_response_enforces_canonical_frame_type(bus: Bus) -> None:
+    async def handler(req: Envelope) -> Envelope:
+        # User returns an envelope with a known event_type but a contradictory
+        # custom frame_type.
+        resp = Envelope.new(ResponseFinal)
+        resp.frame_type = "custom.response.final"
+        return resp
+
+    await bus.handle_invoke("typed-resp", handler)
+    resp = await bus.invoke("typed-resp", {"msg": "hi"})
+    assert resp.event_type == ResponseFinal
+    assert resp.frame_type == FrameTypeResponseFinal
+
+
+async def test_invoke_response_preserves_custom_frame_type_for_unknown_event_type(bus: Bus) -> None:
+    async def handler(req: Envelope) -> Envelope:
+        resp = Envelope.new("goc.incident.created")
+        resp.frame_type = "custom.frame"
+        return resp
+
+    await bus.handle_invoke("custom-resp", handler)
+    resp = await bus.invoke("custom-resp", {"msg": "hi"})
+    assert resp.event_type == "goc.incident.created"
+    assert resp.frame_type == "custom.frame"
 
 
 async def test_stream_auto_finalizes_on_clean_return(bus: Bus) -> None:

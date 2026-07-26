@@ -65,6 +65,6 @@ if (!ok) throw new Error("invalid envelope");
 
 ## 协议演进规则
 
-- **新增可选字段**:不动 `schema_version`(向前兼容)。
+- **新增可选字段**:不动 `schema_version`(向前兼容)。例如 v0.3.x 新增的 `frame_type` 是可选实验字段，旧 SDK 可安全忽略，因此 `schema_version` 保持为 1。
 - **新增必填字段 / 改变现有字段含义**:`schema_version` +1,旧 SDK 必须能继续解析(忽略新字段),新 SDK 拿到 `schema_version < 当前` 时按降级路径处理。
 - **`spec_version` 大版本**:仅在协议出现 breaking 变更(如重命名/删除字段)时调整,需要并发维护多版本 SDK。

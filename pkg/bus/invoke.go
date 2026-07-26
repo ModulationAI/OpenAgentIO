@@ -153,6 +153,9 @@ func (b *defaultBus) buildRequestEnvelope(target string, payload any) (*event.En
 		if env.TenantID == "" {
 			env.TenantID = b.opts.Tenant
 		}
+		if env.FrameType == "" && env.EventType == event.MessageReceived {
+			env.FrameType = event.FrameTypeRequest
+		}
 		return env, nil
 	}
 
@@ -201,6 +204,7 @@ func (b *defaultBus) errorResponse(req *event.Envelope, srcErr error) *event.Env
 // flows back through cascading invocations without manual copying.
 func newReplyShell(agentID string, req *event.Envelope, eventType string) *event.Envelope {
 	resp := event.New(eventType)
+	resp.FrameType = event.FrameTypeForEventType(eventType)
 	resp.From = agentID
 	resp.To = req.From
 	resp.SessionID = req.SessionID
@@ -266,6 +270,11 @@ func adoptResponse(agentID string, req, user *event.Envelope) *event.Envelope {
 	}
 	if !resp.IsFinal && event.IsTerminal(resp.EventType) {
 		resp.IsFinal = true
+	}
+	// For known protocol event types, frame_type is canonical and must not
+	// contradict event_type. Derive it from event_type whenever a mapping exists.
+	if ft := event.FrameTypeForEventType(resp.EventType); ft != "" {
+		resp.FrameType = ft
 	}
 	if resp.Metadata == nil {
 		resp.Metadata = inheritMetadata(req.Metadata)
