@@ -33,6 +33,11 @@
       "minLength": 1,
       "description": "Logical event identifier, e.g. \"agent.response.delta\"."
     },
+    "frame_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Experimental protocol frame discriminator (e.g. \"response.delta\"). Optional; consumers should fall back to event_type when absent."
+    },
     "occurred_at": {
       "type": "string",
       "format": "date-time",
@@ -100,16 +105,32 @@
         "required": ["is_final"]
       },
       "then": {
-        "properties": {
-          "event_type": {
-            "enum": [
-              "agent.response.final",
-              "agent.response.error",
-              "agent.tool.result",
-              "agent.task.completed"
-            ]
+        "anyOf": [
+          {
+            "properties": {
+              "event_type": {
+                "enum": [
+                  "agent.response.final",
+                  "agent.response.error",
+                  "agent.tool.result",
+                  "agent.task.completed"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "frame_type": {
+                "enum": [
+                  "response.final",
+                  "response.error",
+                  "tool.result"
+                ]
+              }
+            },
+            "required": ["frame_type"]
           }
-        }
+        ]
       }
     },
     {

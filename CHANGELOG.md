@@ -14,10 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BridgeConfig.resolve_env()` and `BridgeDefinition.resolve_env()` for opt-in `${VAR}` / `${VAR:-default}` environment-variable placeholder resolution.
 - Active Event Source supervision: `EventSourceSupervisor`, `RestartPolicy`, `BridgeHealth`, `BridgeHealthSnapshot`, and `PermanentBridgeError`.
 - Optional `Bridge.health` hook and `BridgeRunner.health` aggregate snapshot so callers can observe bridge health.
+- Bridge capability matrix in `prompts/bridge-capabilities.md`, documenting direction, Bus modes, session/trace/error mapping, timeout/retry/reconnect, auth, unsupported features, testing, and production readiness for all built-in bridges.
+- Optional experimental `frame_type` field on `Envelope` in Go, Python, and TypeScript SDKs. The framework now dual-writes `frame_type` alongside `event_type` for protocol frames (request/response/tool); for known protocol event types, `frame_type` is canonical and derived from `event_type`, while unknown event types preserve any explicit `frame_type`.
 
 ### Changed
 
 - `prompts/design.md` renumbered: Python SDK design moved to §10, ecosystem/interop to §11, HTTP/SSE adapter to §12, etc.
+- `prompts/design.md` §3.2.4, `prompts/a2a_prot.md`, and `ROADMAP.md` updated to reflect the v0.3.x decision: optional experimental `frame_type` is adopted, while `Phase` and a `schema_version` bump to 2 are deferred until the Invocation/Task state model is defined.
 - `prompts/design.md` §9.11 and `prompts/adr-012-bridge-spi.md` updated to document active Event Source supervision semantics (`EventSourceSupervisor`, `RestartPolicy`, health snapshots, failure isolation).
 - `MatrixEventBridge` now delegates its background sync loop to `EventSourceSupervisor`, with optional `supervision` config for max restarts, exponential backoff, jitter, and health threshold.
 

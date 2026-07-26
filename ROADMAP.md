@@ -21,11 +21,12 @@ OpenAgentIO is a lightweight, ACP-compatible communication runtime for AI agents
 
 Goal: Gradually absorb A2A (Agent-to-Agent) design principles without premature lock-in to a moving standard. EventType semantic overload is the primary technical debt.
 
-### v0.3 — Phase Field Introduction
-- Add `Phase string` to `Envelope` (schema v2) to carry protocol state (`submitted` / `working` / `completed` / `failed`).
-- EventType reverts to pure business routing key semantics.
-- Dual-write transition: framework populates both `Phase` and `EventType`; consumers read `Phase` first, fallback to `EventType`.
-- Update `IsTerminal()`, HTTP adapter error branching, and SSE event names.
+### v0.3 — Experimental `frame_type` Field
+- Add optional `frame_type string` to `Envelope` (schema v1) to carry protocol frame kind (`request` / `response.started` / `response.delta` / `response.final` / `response.error` / `tool.call` / `tool.result`).
+- Keep `EventType` semantics unchanged during the compatibility period; framework dual-writes both `EventType` and `FrameType`.
+- Consumers read `frame_type` first, fallback to `EventType` when absent.
+- Defer `Phase` / schema v2 until the Invocation/Task state model is established.
+- Update `IsTerminal()` behavior remains based on `EventType`; SSE event names stay derived from `EventType`.
 - **Reference**: `prompts/a2a_prot.md` for detailed trade-off analysis (Options A/B/C).
 
 ### v0.4 — Task Model Evaluation

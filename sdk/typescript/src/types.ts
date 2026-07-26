@@ -11,6 +11,15 @@ export const ToolResult = "agent.tool.result";
 export const TaskCreated = "agent.task.created";
 export const TaskCompleted = "agent.task.completed";
 
+// Experimental frame types — optional protocol-level discriminator.
+export const FrameTypeRequest = "request";
+export const FrameTypeResponseStarted = "response.started";
+export const FrameTypeResponseDelta = "response.delta";
+export const FrameTypeResponseFinal = "response.final";
+export const FrameTypeResponseError = "response.error";
+export const FrameTypeToolCall = "tool.call";
+export const FrameTypeToolResult = "tool.result";
+
 export type StandardEventType =
   | typeof MessageReceived
   | typeof ResponseStarted
@@ -47,6 +56,7 @@ export interface Envelope<TPayload = JsonValue> {
   schema_version: number;
   event_id: string;
   event_type: string;
+  frame_type?: string;
   occurred_at: string;
 
   trace_id?: string;
@@ -90,4 +100,23 @@ export function isTerminal(eventType: string): boolean {
     eventType === ToolResult ||
     eventType === TaskCompleted
   );
+}
+
+const frameTypeForEventTypeMap: Record<string, string> = {
+  [MessageReceived]: FrameTypeRequest,
+  [ResponseStarted]: FrameTypeResponseStarted,
+  [ResponseDelta]: FrameTypeResponseDelta,
+  [ResponseFinal]: FrameTypeResponseFinal,
+  [ResponseError]: FrameTypeResponseError,
+  [ToolCall]: FrameTypeToolCall,
+  [ToolResult]: FrameTypeToolResult,
+};
+
+export function frameTypeForEventType(eventType: string): string {
+  return frameTypeForEventTypeMap[eventType] ?? "";
+}
+
+export function effectiveFrameType(env: Envelope): string {
+  const ft = frameTypeForEventType(env.event_type);
+  return ft || env.frame_type || "";
 }

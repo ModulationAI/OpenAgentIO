@@ -208,6 +208,7 @@ func writeSSEError(w http.ResponseWriter, rc *http.ResponseController, srcErr er
 		code = event.CodeAgentTimeout
 	}
 	frame := event.New(event.ResponseError)
+	frame.FrameType = event.FrameTypeResponseError
 	frame.IsFinal = true
 	body, _ := json.Marshal(event.ErrorPayload{
 		Code:    code,

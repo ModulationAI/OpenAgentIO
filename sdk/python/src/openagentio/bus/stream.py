@@ -20,10 +20,15 @@ from openagentio.bus.errors import (
 )
 from openagentio.event.payload import ErrorPayload
 from openagentio.event.types import (
+    FrameTypeResponseDelta,
+    FrameTypeResponseError,
+    FrameTypeResponseFinal,
+    FrameTypeResponseStarted,
     ResponseDelta,
     ResponseError,
     ResponseFinal,
     ResponseStarted,
+    frame_type_for_event_type,
 )
 from openagentio.transport.base import Inbox, RawMessage, Transport
 
@@ -408,6 +413,7 @@ def new_reply_shell(agent_id: str, req: Envelope, event_type: str) -> Envelope:
     flows back through cascading invocations without manual copying.
     """
     resp = Envelope.new(event_type)
+    resp.frame_type = frame_type_for_event_type(event_type)
     resp.from_ = agent_id
     resp.to = req.from_
     resp.session_id = req.session_id

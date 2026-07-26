@@ -14,6 +14,11 @@ import pytest
 
 from openagentio import (
     Envelope,
+    FrameTypeRequest,
+    FrameTypeResponseDelta,
+    FrameTypeResponseError,
+    FrameTypeResponseFinal,
+    FrameTypeResponseStarted,
     MessageReceived,
     ResponseDelta,
     ResponseError,
@@ -21,6 +26,8 @@ from openagentio import (
     ResponseStarted,
     SCHEMA_VERSION,
     SPEC_VERSION,
+    effective_frame_type,
+    frame_type_for_event_type,
     is_terminal,
 )
 
@@ -83,29 +90,81 @@ def test_is_terminal_known_types() -> None:
     assert not is_terminal(ResponseDelta)
 
 
+def test_frame_type_for_event_type_maps_standard_event_types() -> None:
+    assert frame_type_for_event_type(MessageReceived) == FrameTypeRequest
+    assert frame_type_for_event_type(ResponseStarted) == FrameTypeResponseStarted
+    assert frame_type_for_event_type(ResponseDelta) == FrameTypeResponseDelta
+    assert frame_type_for_event_type(ResponseFinal) == FrameTypeResponseFinal
+    assert frame_type_for_event_type(ResponseError) == FrameTypeResponseError
+
+
+def test_frame_type_for_event_type_unknown_returns_empty() -> None:
+    assert frame_type_for_event_type("goc.incident.created") == ""
+
+
+def test_effective_frame_type_uses_canonical_mapping_for_known_event_type() -> None:
+    env = Envelope.new(ResponseDelta)
+    # A contradictory frame_type on a known event_type must be ignored so old
+    # and new consumers stay consistent.
+    env.frame_type = FrameTypeResponseFinal
+    assert effective_frame_type(env) == FrameTypeResponseDelta
+
+
+def test_effective_frame_type_falls_back_to_explicit_value_for_unknown_event_type() -> None:
+    env = Envelope.new("goc.incident.created")
+    env.frame_type = "custom.frame"
+    assert effective_frame_type(env) == "custom.frame"
+
+
+def test_effective_frame_type_falls_back_to_event_type() -> None:
+    env = Envelope.new(ResponseDelta)
+    assert effective_frame_type(env) == FrameTypeResponseDelta
+
+
+def test_envelope_new_request_sets_frame_type() -> None:
+    env = Envelope.new_request()
+    assert env.event_type == MessageReceived
+    assert env.frame_type == FrameTypeRequest
+
+
+def test_frame_type_round_trips() -> None:
+    env = Envelope.new(ResponseStarted)
+    env.frame_type = FrameTypeResponseStarted
+    env2 = Envelope.from_bytes(env.to_bytes())
+    assert env2.frame_type == FrameTypeResponseStarted
+
+
+def test_frame_type_omitted_when_empty() -> None:
+    env = Envelope.new(ResponseDelta)
+    raw = json.loads(env.to_bytes())
+    assert "frame_type" not in raw
+
+
 # --- Golden samples produced by the Go SDK ---------------------------------
 
 
 @pytest.mark.parametrize(
-    "filename",
+    "filename,expected_frame_type",
     [
-        "message_received.json",
-        "response_started.json",
-        "response_delta.json",
-        "response_final.json",
-        "response_error.json",
+        ("message_received.json", FrameTypeRequest),
+        ("response_started.json", FrameTypeResponseStarted),
+        ("response_delta.json", FrameTypeResponseDelta),
+        ("response_final.json", FrameTypeResponseFinal),
+        ("response_error.json", FrameTypeResponseError),
     ],
 )
-def test_decode_go_sample(filename: str) -> None:
+def test_decode_go_sample(filename: str, expected_frame_type: str) -> None:
     raw = (SAMPLES / filename).read_bytes()
     env = Envelope.from_bytes(raw)
     assert env.spec_version == "acp/1.0"
     assert env.schema_version == 1
     assert env.event_id  # non-empty
+    assert env.frame_type == expected_frame_type
     # Round-trip preserves identity for fields the Python side reads.
     env2 = Envelope.from_bytes(env.to_bytes())
     assert env2.event_id == env.event_id
     assert env2.event_type == env.event_type
+    assert env2.frame_type == env.frame_type
     assert env2.from_ == env.from_
     assert env2.to == env.to
     assert env2.seq == env.seq

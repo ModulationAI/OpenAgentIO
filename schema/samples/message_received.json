@@ -3,6 +3,7 @@
   "schema_version": 1,
   "event_id": "019de7eb-baab-7e67-bb77-a7a03a666140",
   "event_type": "agent.message.received",
+  "frame_type": "request",
   "occurred_at": "2026-05-02T10:00:00Z",
   "from": "user-gateway",
   "to": "main-agent",
