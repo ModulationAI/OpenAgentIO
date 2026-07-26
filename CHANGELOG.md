@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   This release should be versioned as **0.3.0** (or higher) because it changes the TypeScript public API contract.
 
+- Response metadata inheritance in Go and Python now uses key-by-key merge semantics: handler-provided metadata overrides inherited request keys for the same name and adds new keys, while `acp.*` runtime keys are filtered from both inherited and handler-provided metadata. Empty handler metadata maps still inherit request metadata.
+
 - `prompts/design.md` renumbered: Python SDK design moved to §10, ecosystem/interop to §11, HTTP/SSE adapter to §12, etc.
 - `prompts/design.md` §3.2.4, `prompts/a2a_prot.md`, and `ROADMAP.md` updated to reflect the v0.3.x decision: optional experimental `frame_type` is adopted, while `Phase` and a `schema_version` bump to 2 are deferred until the Invocation/Task state model is defined.
 - `prompts/design.md` §9.11 and `prompts/adr-012-bridge-spi.md` updated to document active Event Source supervision semantics (`EventSourceSupervisor`, `RestartPolicy`, health snapshots, failure isolation).

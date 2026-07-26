@@ -561,7 +561,7 @@ class Bus:
         return resp
 
     def _adopt_response(self, req: Envelope, user: Envelope) -> Envelope:
-        from openagentio.bus.stream import _inherit_metadata
+        from openagentio.bus.stream import _merge_metadata
 
         resp = user.clone()
         if not resp.from_:
@@ -587,6 +587,5 @@ class Bus:
         ft = frame_type_for_event_type(resp.event_type)
         if ft:
             resp.frame_type = ft
-        if resp.metadata is None:
-            resp.metadata = _inherit_metadata(req.metadata)
+        resp.metadata = _merge_metadata(req.metadata, resp.metadata)
         return resp

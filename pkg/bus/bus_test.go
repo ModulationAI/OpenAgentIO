@@ -90,6 +90,144 @@ func TestInvokeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestInvokeHandlerMetadataMergesWithRequest(t *testing.T) {
+	b, done := newTestBus(t, "merge-agent")
+	defer done()
+
+	if err := b.HandleInvoke("merge", func(_ context.Context, _ *event.Envelope) (any, error) {
+		resp := event.New(event.ResponseFinal)
+		resp.Metadata = map[string]any{"handler_key": "handler_value"}
+		return resp, nil
+	}); err != nil {
+		t.Fatalf("HandleInvoke: %v", err)
+	}
+
+	req := event.NewRequest()
+	req.Metadata = map[string]any{
+		"request_key":  "request_value",
+		"shared_key":   "request_value",
+		"acp.internal": "must_be_filtered",
+	}
+
+	resp, err := b.Invoke(context.Background(), "merge", req)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	md := resp.Metadata
+	if md == nil {
+		t.Fatal("response metadata is nil")
+	}
+	if md["request_key"] != "request_value" {
+		t.Fatalf("request_key not inherited: got %v", md["request_key"])
+	}
+	if md["handler_key"] != "handler_value" {
+		t.Fatalf("handler_key missing: got %v", md["handler_key"])
+	}
+	if md["shared_key"] != "request_value" {
+		t.Fatalf("shared_key should keep request value when handler does not override: got %v", md["shared_key"])
+	}
+	if _, ok := md["acp.internal"]; ok {
+		t.Fatalf("acp.* key from request leaked into response")
+	}
+}
+
+func TestInvokeHandlerMetadataOverridesRequest(t *testing.T) {
+	b, done := newTestBus(t, "override-agent")
+	defer done()
+
+	if err := b.HandleInvoke("override", func(_ context.Context, _ *event.Envelope) (any, error) {
+		resp := event.New(event.ResponseFinal)
+		resp.Metadata = map[string]any{"shared_key": "handler_value", "acp.handler": "filtered"}
+		return resp, nil
+	}); err != nil {
+		t.Fatalf("HandleInvoke: %v", err)
+	}
+
+	req := event.NewRequest()
+	req.Metadata = map[string]any{"shared_key": "request_value"}
+
+	resp, err := b.Invoke(context.Background(), "override", req)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	md := resp.Metadata
+	if md["shared_key"] != "handler_value" {
+		t.Fatalf("shared_key should be overridden by handler: got %v", md["shared_key"])
+	}
+	if _, ok := md["acp.handler"]; ok {
+		t.Fatalf("acp.* key from handler leaked into response")
+	}
+}
+
+func TestInvokeHandlerEmptyMetadataInheritsRequest(t *testing.T) {
+	b, done := newTestBus(t, "empty-agent")
+	defer done()
+
+	if err := b.HandleInvoke("empty", func(_ context.Context, _ *event.Envelope) (any, error) {
+		resp := event.New(event.ResponseFinal)
+		resp.Metadata = map[string]any{}
+		return resp, nil
+	}); err != nil {
+		t.Fatalf("HandleInvoke: %v", err)
+	}
+
+	req := event.NewRequest()
+	req.Metadata = map[string]any{"request_key": "request_value"}
+
+	resp, err := b.Invoke(context.Background(), "empty", req)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	md := resp.Metadata
+	if md == nil || md["request_key"] != "request_value" {
+		t.Fatalf("empty handler metadata should still inherit request metadata: got %v", md)
+	}
+}
+
+func TestInvokeHandlerMetadataDoesNotMutateInputs(t *testing.T) {
+	b, done := newTestBus(t, "no-mutate-agent")
+	defer done()
+
+	var handlerResp *event.Envelope
+	if err := b.HandleInvoke("no-mutate", func(_ context.Context, _ *event.Envelope) (any, error) {
+		resp := event.New(event.ResponseFinal)
+		resp.Metadata = map[string]any{"handler_key": "handler_value"}
+		handlerResp = resp
+		return resp, nil
+	}); err != nil {
+		t.Fatalf("HandleInvoke: %v", err)
+	}
+
+	req := event.NewRequest()
+	req.Metadata = map[string]any{"request_key": "request_value"}
+
+	resp, err := b.Invoke(context.Background(), "no-mutate", req)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	// Mutate the merged response metadata and ensure the original input maps are untouched.
+	resp.Metadata["new_key"] = "new_value"
+	delete(resp.Metadata, "request_key")
+	resp.Metadata["handler_key"] = "mutated"
+
+	if _, ok := req.Metadata["new_key"]; ok {
+		t.Fatalf("modifying response metadata mutated request.Metadata")
+	}
+	if req.Metadata["request_key"] != "request_value" {
+		t.Fatalf("request.Metadata key was deleted or overwritten: got %v", req.Metadata)
+	}
+	if _, ok := handlerResp.Metadata["new_key"]; ok {
+		t.Fatalf("modifying response metadata mutated handler-returned Metadata")
+	}
+	if handlerResp.Metadata["handler_key"] != "handler_value" {
+		t.Fatalf("handler-returned Metadata key was overwritten: got %v", handlerResp.Metadata)
+	}
+}
+
 func TestHandleInvokeDefaultsToTargetQueue(t *testing.T) {
 	b, done := newTestBus(t, "invoke-agent")
 	defer done()

@@ -87,3 +87,85 @@ async def test_invoke_timeout_error_maps_to_agent_timeout(bus: Bus) -> None:
     err = resp.payload_json()
     assert err["code"] == CodeAgentTimeout
     assert err["retryable"] is True
+
+
+async def test_invoke_handler_metadata_merges_with_request(bus: Bus) -> None:
+    async def handler(req: Envelope) -> Envelope:
+        out = Envelope.new(ResponseFinal)
+        out.metadata = {"handler_key": "handler_value"}
+        return out
+
+    await bus.handle_invoke("merge", handler)
+
+    req = Envelope.new_request()
+    req.metadata = {
+        "request_key": "request_value",
+        "shared_key": "request_value",
+        "acp.internal": "must_be_filtered",
+    }
+    resp = await bus.invoke("merge", req)
+
+    assert resp.metadata["request_key"] == "request_value"
+    assert resp.metadata["handler_key"] == "handler_value"
+    assert resp.metadata["shared_key"] == "request_value"
+    assert "acp.internal" not in resp.metadata
+
+
+async def test_invoke_handler_metadata_overrides_request(bus: Bus) -> None:
+    async def handler(req: Envelope) -> Envelope:
+        out = Envelope.new(ResponseFinal)
+        out.metadata = {"shared_key": "handler_value", "acp.handler": "filtered"}
+        return out
+
+    await bus.handle_invoke("override", handler)
+
+    req = Envelope.new_request()
+    req.metadata = {"shared_key": "request_value"}
+    resp = await bus.invoke("override", req)
+
+    assert resp.metadata["shared_key"] == "handler_value"
+    assert "acp.handler" not in resp.metadata
+
+
+async def test_invoke_handler_empty_metadata_inherits_request(bus: Bus) -> None:
+    async def handler(req: Envelope) -> Envelope:
+        out = Envelope.new(ResponseFinal)
+        out.metadata = {}
+        return out
+
+    await bus.handle_invoke("empty", handler)
+
+    req = Envelope.new_request()
+    req.metadata = {"request_key": "request_value"}
+    resp = await bus.invoke("empty", req)
+
+    assert resp.metadata is not None
+    assert resp.metadata["request_key"] == "request_value"
+
+
+async def test_invoke_handler_metadata_does_not_mutate_inputs(bus: Bus) -> None:
+    handler_out: Envelope | None = None
+
+    async def handler(req: Envelope) -> Envelope:
+        nonlocal handler_out
+        out = Envelope.new(ResponseFinal)
+        out.metadata = {"handler_key": "handler_value"}
+        handler_out = out
+        return out
+
+    await bus.handle_invoke("no-mutate", handler)
+
+    req = Envelope.new_request()
+    req.metadata = {"request_key": "request_value"}
+    resp = await bus.invoke("no-mutate", req)
+
+    # Mutate the merged response metadata and ensure the original input maps are untouched.
+    resp.metadata["new_key"] = "new_value"
+    resp.metadata.pop("request_key", None)
+    resp.metadata["handler_key"] = "mutated"
+
+    assert "new_key" not in req.metadata
+    assert req.metadata.get("request_key") == "request_value"
+    assert handler_out is not None
+    assert "new_key" not in handler_out.metadata
+    assert handler_out.metadata.get("handler_key") == "handler_value"
