@@ -6,6 +6,7 @@ import {
   OpenAgentIOHTTPError,
   ResponseDelta,
   ResponseFinal,
+  isErrorPayload,
   parseSSEStream,
 } from "../dist/index.js";
 
@@ -115,12 +116,37 @@ test("OpenAgentIOClient.streamInvoke yields envelopes with SSE metadata", async 
   assert.deepEqual(events[1].payload, { done: true });
 });
 
+test("isErrorPayload rejects missing retryable", () => {
+  assert.equal(isErrorPayload({ code: "NO_HANDLER", message: "no handler" }), false);
+});
+
+test("isErrorPayload accepts valid ErrorPayload with retryable", () => {
+  assert.ok(isErrorPayload({ code: "NO_HANDLER", message: "no handler", retryable: false }));
+});
+
+test("isErrorPayload rejects invalid cause", () => {
+  assert.equal(
+    isErrorPayload({ code: "X", message: "x", retryable: false, cause: [1, 2] }),
+    false,
+  );
+  assert.equal(
+    isErrorPayload({ code: "X", message: "x", retryable: false, cause: "oops" }),
+    false,
+  );
+});
+
+test("isErrorPayload accepts valid cause object", () => {
+  assert.ok(
+    isErrorPayload({ code: "X", message: "x", retryable: true, cause: { detail: "y" } }),
+  );
+});
+
 test("OpenAgentIOClient throws OpenAgentIOHTTPError for adapter JSON errors", async () => {
   const client = new OpenAgentIOClient({
     baseUrl: "http://localhost:8080",
     fetch: async () =>
       jsonResponse(
-        { code: "NO_HANDLER", message: "no handler" },
+        { code: "NO_HANDLER", message: "no handler", retryable: false },
         { status: 404, statusText: "Not Found" },
       ),
   });

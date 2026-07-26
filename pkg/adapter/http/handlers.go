@@ -211,8 +211,9 @@ func writeSSEError(w http.ResponseWriter, rc *http.ResponseController, srcErr er
 	frame.FrameType = event.FrameTypeResponseError
 	frame.IsFinal = true
 	body, _ := json.Marshal(event.ErrorPayload{
-		Code:    code,
-		Message: srcErr.Error(),
+		Code:      code,
+		Message:   srcErr.Error(),
+		Retryable: code == event.CodeAgentTimeout,
 	})
 	frame.Payload = body
 	_ = writeSSEEnvelope(w, rc, frame, retryMs)

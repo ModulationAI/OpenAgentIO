@@ -1,4 +1,4 @@
-import type { Envelope, ErrorPayload, JsonValue } from "./types.js";
+import type { Envelope, ErrorPayload, JsonObject, JsonValue } from "./types.js";
 
 export class OpenAgentIOHTTPError extends Error {
   readonly name = "OpenAgentIOHTTPError";
@@ -37,11 +37,30 @@ export class OpenAgentIOSSEError extends Error {
   }
 }
 
-export function isErrorPayload(value: unknown): value is ErrorPayload {
+function isJsonObject(value: unknown): value is JsonObject {
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as ErrorPayload).code === "string" &&
-    typeof (value as ErrorPayload).message === "string"
+    !Array.isArray(value)
   );
+}
+
+export function isErrorPayload(value: unknown): value is ErrorPayload {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.code !== "string") {
+    return false;
+  }
+  if (typeof candidate.message !== "string") {
+    return false;
+  }
+  if (typeof candidate.retryable !== "boolean") {
+    return false;
+  }
+  if ("cause" in candidate && candidate.cause !== undefined && !isJsonObject(candidate.cause)) {
+    return false;
+  }
+  return true;
 }

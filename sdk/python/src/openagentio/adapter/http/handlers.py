@@ -24,9 +24,10 @@ from openagentio.event.types import FrameTypeResponseError, ResponseError
 from openagentio.adapter.http.auth import AuthContext
 from openagentio.adapter.http.envelope import read_envelope
 from openagentio.adapter.http.errors import (
-    write_error_json,
+    _error_payload_content,
     write_bus_error,
     write_envelope_error,
+    write_error_json,
 )
 
 if TYPE_CHECKING:
@@ -171,12 +172,11 @@ def _format_sse_envelope(env: Envelope, retry_ms: int = 0) -> bytes:
 
 
 def _format_sse_error(exc: BaseException, retry_ms: int = 0) -> bytes:
-    code = CodeAgentUnavailable
-    if isinstance(exc, (asyncio.TimeoutError, ErrIdleTimeout)):
-        code = CodeAgentTimeout
+    code = CodeAgentTimeout if isinstance(exc, (asyncio.TimeoutError, ErrIdleTimeout)) else CodeAgentUnavailable
+    retryable = code == CodeAgentTimeout
     frame = Envelope.new(ResponseError)
     frame.frame_type = FrameTypeResponseError
     frame.is_final = True
-    payload = ErrorPayload(code=code, message=str(exc))
-    frame.payload = json.dumps({"code": payload.code, "message": payload.message}).encode("utf-8")
+    payload = ErrorPayload(code=code, message=str(exc), retryable=retryable)
+    frame.payload = json.dumps(_error_payload_content(payload)).encode("utf-8")
     return _format_sse_envelope(frame, retry_ms)

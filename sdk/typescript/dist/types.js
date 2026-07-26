@@ -17,6 +17,15 @@ export const FrameTypeResponseFinal = "response.final";
 export const FrameTypeResponseError = "response.error";
 export const FrameTypeToolCall = "tool.call";
 export const FrameTypeToolResult = "tool.result";
+// Standard error codes used by ErrorPayload. Wire-identical to Go/Python SDKs.
+export const CodeAgentTimeout = "AGENT_TIMEOUT";
+export const CodeAgentUnavailable = "AGENT_UNAVAILABLE";
+export const CodeBackpressureDrop = "BACKPRESSURE_DROP";
+export const CodeTransportFailure = "TRANSPORT_FAILURE";
+export const CodeCodecFailure = "CODEC_FAILURE";
+export const CodeAuthFailure = "AUTH_FAILURE";
+export const CodeInvalidRequest = "INVALID_REQUEST";
+export const CodeNoHandler = "NO_HANDLER";
 export function isTerminal(eventType) {
     return (eventType === ResponseFinal ||
         eventType === ResponseError ||
@@ -36,6 +45,7 @@ export function frameTypeForEventType(eventType) {
     return frameTypeForEventTypeMap[eventType] ?? "";
 }
 export function effectiveFrameType(env) {
-    return env.frame_type || frameTypeForEventType(env.event_type);
+    const ft = frameTypeForEventType(env.event_type);
+    return ft || env.frame_type || "";
 }
 //# sourceMappingURL=types.js.map

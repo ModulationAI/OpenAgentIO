@@ -51,16 +51,44 @@ def status_for_bus_error(exc: BaseException) -> tuple[int, str]:
     return 502, CodeAgentUnavailable
 
 
-def write_error_json(status: int, code: str, message: str) -> JSONResponse:
+def _retryable_for_bus_error(exc: BaseException) -> bool:
+    if isinstance(exc, (asyncio.TimeoutError, ErrIdleTimeout)):
+        return True
+    if isinstance(exc, asyncio.CancelledError):
+        return False
+    return False
+
+
+def _error_payload_content(ep: ErrorPayload) -> dict[str, Any]:
+    """Return the canonical JSON shape for an ErrorPayload-shaped body."""
+    content: dict[str, Any] = {
+        "code": ep.code,
+        "message": ep.message,
+        "retryable": ep.retryable,
+    }
+    if ep.cause:
+        content["cause"] = ep.cause
+    return content
+
+
+def write_error_json(
+    status: int, code: str, message: str, retryable: bool = False
+) -> JSONResponse:
+    ep = ErrorPayload(code=code, message=message, retryable=retryable)
     return JSONResponse(
         status_code=status,
-        content={"code": code, "message": message},
+        content=_error_payload_content(ep),
     )
 
 
 def write_bus_error(exc: BaseException) -> JSONResponse:
     status, code = status_for_bus_error(exc)
-    return write_error_json(status, code, str(exc))
+    retryable = _retryable_for_bus_error(exc)
+    ep = ErrorPayload(code=code, message=str(exc), retryable=retryable)
+    return JSONResponse(
+        status_code=status,
+        content=_error_payload_content(ep),
+    )
 
 
 def write_envelope_error(env: Envelope) -> JSONResponse:
@@ -81,9 +109,4 @@ def write_envelope_error(env: Envelope) -> JSONResponse:
     if not ep.message:
         ep.message = "agent error"
     status = status_for_code(ep.code)
-    content = {"code": ep.code, "message": ep.message}
-    if ep.retryable:
-        content["retryable"] = ep.retryable
-    if ep.cause:
-        content["cause"] = ep.cause
-    return JSONResponse(status_code=status, content=content)
+    return JSONResponse(status_code=status, content=_error_payload_content(ep))
