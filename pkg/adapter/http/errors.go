@@ -50,12 +50,13 @@ func statusForBusError(err error) (int, string) {
 
 // writeErrorJSON writes an ErrorPayload-shaped body with the given status.
 // Used by middleware (Recover) and the request handlers.
-func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
+func writeErrorJSON(w http.ResponseWriter, status int, code, message string, retryable bool) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(event.ErrorPayload{
-		Code:    code,
-		Message: message,
+		Code:      code,
+		Message:   message,
+		Retryable: retryable,
 	})
 }
 

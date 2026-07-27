@@ -20,7 +20,7 @@ func (a *Adapter) authenticate(w http.ResponseWriter, r *http.Request) (*AuthCon
 	}
 	ac, err := a.auth(r)
 	if err != nil {
-		writeErrorJSON(w, http.StatusUnauthorized, event.CodeAuthFailure, err.Error())
+		writeErrorJSON(w, http.StatusUnauthorized, event.CodeAuthFailure, err.Error(), false)
 		return nil, false
 	}
 	return ac, true
@@ -34,12 +34,12 @@ func (a *Adapter) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	}
 	target := r.PathValue("target")
 	if target == "" {
-		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, "missing target")
+		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, "missing target", false)
 		return
 	}
 	env, err := readEnvelope(r, "", ac)
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, err.Error())
+		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, err.Error(), false)
 		return
 	}
 
@@ -78,12 +78,12 @@ func (a *Adapter) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	target := r.PathValue("target")
 	if target == "" {
-		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, "missing target")
+		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, "missing target", false)
 		return
 	}
 	env, err := readEnvelope(r, "", ac)
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, err.Error())
+		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, err.Error(), false)
 		return
 	}
 
@@ -141,12 +141,12 @@ func (a *Adapter) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 	eventType := r.PathValue("event_type")
 	if eventType == "" {
-		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, "missing event_type")
+		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, "missing event_type", false)
 		return
 	}
 	env, err := readEnvelope(r, eventType, ac)
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, err.Error())
+		writeErrorJSON(w, http.StatusBadRequest, event.CodeInvalidRequest, err.Error(), false)
 		return
 	}
 

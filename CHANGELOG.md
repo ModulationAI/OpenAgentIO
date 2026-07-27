@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bridge capability matrix in `prompts/bridge-capabilities.md`, documenting direction, Bus modes, session/trace/error mapping, timeout/retry/reconnect, auth, unsupported features, testing, and production readiness for all built-in bridges.
 - Optional experimental `frame_type` field on `Envelope` in Go, Python, and TypeScript SDKs. The framework now dual-writes `frame_type` alongside `event_type` for protocol frames (request/response/tool); for known protocol event types, `frame_type` is canonical and derived from `event_type`, while unknown event types preserve any explicit `frame_type`.
 - Standard error-code constants (`CodeAgentTimeout`, `CodeAgentUnavailable`, etc.) are now exported from the TypeScript SDK (`sdk/typescript/src/types.ts`).
+- Cross-language contract test matrix added: Go (`pkg/event/golden_test.go`), Python (`sdk/python/tests/test_golden_samples.py`), and TypeScript (`sdk/typescript/test/golden.test.mjs`) now validate golden samples against `schema/envelope.schema.json` and assert required fields, RFC3339 timestamps, UUIDv7 IDs, `seq=0` omission, terminal/`is_final` rules, unknown-field forward compatibility, and `ErrorPayload` shape.
 
 ### Changed
 
@@ -46,7 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `prompts/design.md` renumbered: Python SDK design moved to §10, ecosystem/interop to §11, HTTP/SSE adapter to §12, etc.
 - `prompts/design.md` §3.2.4, `prompts/a2a_prot.md`, and `ROADMAP.md` updated to reflect the v0.3.x decision: optional experimental `frame_type` is adopted, while `Phase` and a `schema_version` bump to 2 are deferred until the Invocation/Task state model is defined.
-- `prompts/design.md` §9.11 and `prompts/adr-012-bridge-spi.md` updated to document active Event Source supervision semantics (`EventSourceSupervisor`, `RestartPolicy`, health snapshots, failure isolation).
+- `prompts/design.md` §2 architecture diagram replaced with a Mermaid flowchart that includes the Go/Python/TypeScript SDKs, Bridge SPI & BridgeRunner, built-in bridges, HTTP/SSE Adapter, OTel EnvelopePreparer, and JSON Schema/golden samples; Router is now shown as internal to Bus and JetStream is marked Planned.
+- `prompts/design.md` metadata and status updated: version bumped to v0.3.0, status changed from Draft to Implemented (with Experimental/Planned chapters), §16.0 snapshot dated 2026-07-26, §16.1 chapter status labels added, and outdated checkmarks for missing Go examples removed.
+- `prompts/design.md` SDK module layout updated: §8.1 Go layout reflects the actual repo (no `examples/`, `cmd/`, `pkg/transport/jetstream/`, or `pkg/middleware/metrics/`); §10 status bumped to v0.3.0 alpha; §10.1 Python layout adds `bridge/` and the full examples list; new §10.7 documents the TypeScript HTTP/SSE Client and its limitations; §15 testing strategy updated to cover Go/Python/TypeScript, Bridge, and HTTP/SSE Adapter tests.
+- `prompts/design.md` §12 HTTP/SSE API description rewritten: endpoints are all `POST`; `invoke` returns payload JSON; `stream` returns full Envelope SSE with `event`/`id`/`retry`/`data`; headers-before/headers-after error handling and cancellation propagation are documented. The cancellation section was subsequently corrected to state that Adapter cancellation currently stops local waiting/SSE output and closes the local Stream/inbox, but does not propagate an active cancellation control frame across transport to the remote handler.
 - `MatrixEventBridge` now delegates its background sync loop to `EventSourceSupervisor`, with optional `supervision` config for max restarts, exponential backoff, jitter, and health threshold.
 
 ### Fixed
@@ -54,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TypeScript `isErrorPayload()` type guard now validates the required `retryable` field and rejects invalid `cause` values, matching the unified `ErrorPayload` interface.
 - Python HTTP/SSE error responses now always serialize the required `retryable` field in `ErrorPayload`-shaped bodies; `cause` remains omitted when empty.
 - Go HTTP/SSE timeout error responses now correctly set `retryable: true` for `AGENT_TIMEOUT`.
+- Go HTTP adapter `writeErrorJSON` now includes the required `retryable` field in 4xx/5xx JSON error responses, aligning with the unified `ErrorPayload` contract and the Python adapter.
 - `BridgeRunner.start()` now preserves the original start exception when a bridge's `stop()` raises `CancelledError` during rollback cleanup.
 - `BridgeConfig.resolve_env()` / `BridgeDefinition.resolve_env()` now recursively resolve `${VAR}` / `${VAR:-default}` placeholders inside nested mappings, lists, and tuples.
 - Active Event Source bridges (e.g., `MatrixEventBridge`) no longer silently stop when their background task exits, and no longer infinite-retry on permanent configuration/authentication errors.
