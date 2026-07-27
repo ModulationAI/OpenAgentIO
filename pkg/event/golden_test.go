@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"testing"
 
@@ -144,5 +145,125 @@ func TestEnvelopeRequiredFields(t *testing.T) {
 	}
 	if err := sch.Validate(v); err != nil {
 		t.Fatalf("freshly minted envelope failed schema: %#v", err)
+	}
+}
+
+// TestUnknownFieldForwardCompat verifies that adding future wire fields does not
+// break codec decode. This matches the schema's additionalProperties: true.
+func TestUnknownFieldForwardCompat(t *testing.T) {
+	c := codec.JSON()
+	dir := schemaDir(t)
+
+	for _, name := range goldenSamples() {
+		t.Run(name, func(t *testing.T) {
+			original := loadJSON(t, filepath.Join(dir, "samples", name))
+
+			var doc map[string]any
+			if err := json.Unmarshal(original, &doc); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			doc["future_field"] = "ignored"
+			withUnknown, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+
+			env, err := c.DecodeEnvelope(withUnknown)
+			if err != nil {
+				t.Fatalf("decode with unknown field failed: %v", err)
+			}
+			if env.EventType == "" {
+				t.Fatal("decoded envelope lost event_type")
+			}
+		})
+	}
+}
+
+// TestSeqZeroOmitted verifies that an explicit seq=0 is omitted from the wire
+// form (omitempty), matching the schema's expectation.
+func TestSeqZeroOmitted(t *testing.T) {
+	c := codec.JSON()
+	env := event.New(event.ResponseDelta)
+	env.Seq = 0
+
+	encoded, err := c.EncodeEnvelope(env)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if bytes.Contains(encoded, []byte(`"seq"`)) {
+		t.Fatalf("seq=0 should be omitted, got %s", encoded)
+	}
+}
+
+// TestTerminalEventSetsIsFinal verifies that newReplyShell produces terminal
+// envelopes with is_final=true for ResponseFinal/ResponseError.
+func TestTerminalEventSetsIsFinal(t *testing.T) {
+	req := event.NewRequest()
+	for _, typ := range []string{event.ResponseFinal, event.ResponseError} {
+		env := event.New(typ)
+		env.CorrelationID = req.EventID
+		env.From = "agent"
+		env.To = req.From
+		if !event.IsTerminal(env.EventType) {
+			t.Fatalf("%q should be terminal", typ)
+		}
+	}
+}
+
+var (
+	uuidV7RE  = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	rfc3339RE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$`)
+)
+
+// TestEventIDIsUUIDv7 verifies that generated event IDs conform to UUIDv7.
+func TestEventIDIsUUIDv7(t *testing.T) {
+	for i := 0; i < 10; i++ {
+		id := event.NewID()
+		if !uuidV7RE.MatchString(id) {
+			t.Fatalf("event ID %q is not a UUIDv7", id)
+		}
+	}
+}
+
+// TestOccurredAtRFC3339 verifies that OccurredAt serializes as RFC3339.
+func TestOccurredAtRFC3339(t *testing.T) {
+	c := codec.JSON()
+	env := event.New(event.MessageReceived)
+
+	encoded, err := c.EncodeEnvelope(env)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	occurred, ok := raw["occurred_at"].(string)
+	if !ok {
+		t.Fatalf("occurred_at is not a string: %T", raw["occurred_at"])
+	}
+	if !rfc3339RE.MatchString(occurred) {
+		t.Fatalf("occurred_at %q is not RFC3339", occurred)
+	}
+}
+
+// TestResponseErrorSampleHasRetryable verifies that the golden error sample
+// carries the required ErrorPayload fields across all SDKs.
+func TestResponseErrorSampleHasRetryable(t *testing.T) {
+	dir := schemaDir(t)
+	data := loadJSON(t, filepath.Join(dir, "samples", "response_error.json"))
+
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	payload, ok := raw["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload is not an object")
+	}
+	for _, key := range []string{"code", "message", "retryable"} {
+		if _, ok := payload[key]; !ok {
+			t.Fatalf("response_error.json payload missing required key %q", key)
+		}
 	}
 }

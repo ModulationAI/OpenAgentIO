@@ -24,7 +24,7 @@ func Recover(log *slog.Logger) Middleware {
 						"panic", rec,
 						"stack", string(debug.Stack()),
 					)
-					writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+					writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error", false)
 				}
 			}()
 			next.ServeHTTP(w, r)

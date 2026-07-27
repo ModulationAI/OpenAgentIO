@@ -356,6 +356,9 @@ func TestAuthRejects401(t *testing.T) {
 	if ep.Code != event.CodeAuthFailure {
 		t.Errorf("code = %q", ep.Code)
 	}
+	if ep.Retryable {
+		t.Errorf("auth failure should not be retryable")
+	}
 }
 
 func TestAuthOverridesHeaders(t *testing.T) {
@@ -518,6 +521,16 @@ func TestInvalidJSONBodyIs400(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var ep event.ErrorPayload
+	if err := json.NewDecoder(resp.Body).Decode(&ep); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if ep.Code != event.CodeInvalidRequest {
+		t.Errorf("code = %q want %q", ep.Code, event.CodeInvalidRequest)
+	}
+	if ep.Retryable {
+		t.Errorf("invalid request should not be retryable")
 	}
 }
 
